@@ -3,6 +3,7 @@ package syncapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -93,8 +94,14 @@ func TestCORSAnswersPreflight(t *testing.T) {
 	if got := rec.Header().Get("Access-Control-Allow-Headers"); got != "Authorization, Content-Type" {
 		t.Errorf("Access-Control-Allow-Headers = %q, want the bearer token and the JSON body to be allowed", got)
 	}
-	if got := rec.Header().Get("Access-Control-Allow-Methods"); got == "" {
-		t.Error("preflight did not say which methods are allowed")
+	// Every method the API actually serves has to be listed, or the browser
+	// refuses the real request. DELETE is the one that is easy to forget: it
+	// arrived with the passkey endpoints, long after this middleware.
+	allowed := rec.Header().Get("Access-Control-Allow-Methods")
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		if !strings.Contains(allowed, method) {
+			t.Errorf("Access-Control-Allow-Methods = %q, want it to include %s", allowed, method)
+		}
 	}
 }
 

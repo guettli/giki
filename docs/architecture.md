@@ -55,6 +55,7 @@ would push those rows straight back to the server. Two defences:
 | `links` | no | Derived from `nodes.body` by both sides. Rebuilt on every write, so it carries no sync columns. |
 | `sync_outbox`, `sync_mute`, `sync_meta` | no | Client only. |
 | `change_log`, `devices` | no | Server only. `change_log.seq` is the sync cursor *and* the audit trail. |
+| `passkey_users`, `passkeys`, `passkey_ceremonies`, `api_sessions` | no | Server only. Public keys are not secret, but they are not the user's knowledge base either, and the sync protocol exists to replicate the latter. Keeping them out of the registry means a client cannot push a row into them. |
 
 `srs_state` is per `(card_id, user_id)`: a shared knowledge base should not mean
 shared learning progress.
@@ -63,12 +64,23 @@ shared learning progress.
 
 Known gaps, roughly in the order they will start to hurt:
 
-* **Authentication is a static token map** (`-tokens`, or `-dev-user` for local
-  work). It needs real accounts with rotation and revocation before an instance
-  is shared with people who do not all trust each other.
+* **Authentication is passkeys** (WebAuthn), with static tokens kept for
+  scripts. A ceremony issues an opaque bearer session rather than setting a
+  cookie: the sync API is a POST with a JSON body, so a cookie would make it
+  reachable from any page the user visits, while a bearer token cannot be read
+  cross-origin. Only the SHA-256 of a session is stored -- and likewise of an
+  in-flight ceremony handle, which is the sole authorization for the
+  unauthenticated `register/finish` -- so a leaked database hands out neither
+  working sessions nor half-finished registrations.
+
+  What is still missing is session management worth the name: a user cannot
+  list or revoke their sessions, only the one device they are holding. Removing
+  a passkey does revoke the sessions that passkey created.
 * **Authorization does not exist.** Every authenticated user receives every
   change. Scoping deltas per user or per notebook is a `WHERE` clause plus a
-  decision about who may read what.
+  decision about who may read what. This is why registering a new account
+  needs `-register-token`: until there is authorization, letting anyone sign
+  up is letting anyone read everything.
 * **OPFS needs a web worker.** `SimpleOpfsFileSystem` requires synchronous
   access handles, which browsers only provide inside a dedicated worker, so the
   app currently falls back to the IndexedDB-backed VFS on the main thread. The
@@ -81,6 +93,12 @@ Known gaps, roughly in the order they will start to hurt:
   local dead-letter table.
 * **No full-text search.** The obvious answer is an FTS5 table derived locally
   on both sides, like `links`.
+* **The passkey ceremonies are not exercised in a browser.** They are tested
+  against a real software authenticator in Go
+  (`internal/syncapi/authapi_test.go`), and the browser test checks that the
+  options the server produces are the options the client can convert. What is
+  missing in between is a ceremony driven through Chrome's virtual
+  authenticator, which needs the DevTools protocol from outside the page.
 * **Clock trust.** See "What this protocol does not do" in
   [sync-protocol.md](sync-protocol.md).
 * **The end-to-end test covers the loop, not the UI.** `tool/e2e.sh` drives

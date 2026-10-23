@@ -19,6 +19,7 @@ import (
 	"strconv"
 
 	"github.com/guettli/giki/internal/auth"
+	"github.com/guettli/giki/internal/passkey"
 	"github.com/guettli/giki/internal/store"
 )
 
@@ -63,10 +64,12 @@ type SyncResponse struct {
 
 // Server serves the sync API, and optionally the PWA itself.
 type Server struct {
-	store   *store.Store
-	auth    auth.Authenticator
-	log     *slog.Logger
-	webRoot string
+	store         *store.Store
+	auth          auth.Authenticator
+	log           *slog.Logger
+	webRoot       string
+	passkeys      *passkey.Service
+	registerToken string
 }
 
 // Option configures a Server.
@@ -76,6 +79,19 @@ type Option func(*Server)
 // API. Without it the server answers only the API paths.
 func WithWebRoot(dir string) Option {
 	return func(s *Server) { s.webRoot = dir }
+}
+
+// WithPasskeys enables the WebAuthn endpoints.
+//
+// registerToken, if set, is what someone must present to create a *new*
+// account; an existing signed-in user needs no token to add another
+// authenticator. Empty means new accounts are closed, which is the right
+// default for an instance with authentication but no authorization.
+func WithPasskeys(service *passkey.Service, registerToken string) Option {
+	return func(s *Server) {
+		s.passkeys = service
+		s.registerToken = registerToken
+	}
 }
 
 // New builds a Server. log may be nil.
@@ -96,6 +112,15 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("GET /api/v1/history", s.handleHistory)
+
+	mux.HandleFunc("POST /api/v1/auth/passkey/register/begin", s.handleRegisterBegin)
+	mux.HandleFunc("POST /api/v1/auth/passkey/register/finish", s.handleRegisterFinish)
+	mux.HandleFunc("POST /api/v1/auth/passkey/login/begin", s.handleLoginBegin)
+	mux.HandleFunc("POST /api/v1/auth/passkey/login/finish", s.handleLoginFinish)
+	mux.HandleFunc("GET /api/v1/auth/whoami", s.handleWhoami)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/v1/auth/passkeys", s.handleListPasskeys)
+	mux.HandleFunc("DELETE /api/v1/auth/passkeys/{id}", s.handleDeletePasskey)
 	if s.webRoot != "" {
 		mux.Handle("GET /", WebUI(s.webRoot))
 		// Without this, a GET to an API path falls through to the app shell:

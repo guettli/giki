@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/guettli/giki/internal/auth"
+	"github.com/guettli/giki/internal/passkey"
 	"github.com/guettli/giki/internal/store"
 	"github.com/guettli/giki/internal/syncapi"
 )
@@ -38,6 +39,20 @@ func run() error {
 		`bearer tokens as "token:user,token:user" (default $GIKI_TOKENS)`)
 	devUser := flag.String("dev-user", "",
 		"INSECURE: authenticate every request as this user, for local development")
+	passkeyDomain := flag.String("passkey-domain", os.Getenv("GIKI_PASSKEY_DOMAIN"),
+		"domain passkeys are bound to, without scheme or port, e.g.\n"+
+			"giki.example.org (default $GIKI_PASSKEY_DOMAIN). Enables the\n"+
+			"WebAuthn endpoints; a credential registered here cannot be used\n"+
+			"anywhere else, which is what makes passkeys unphishable.")
+	passkeyOrigins := flag.String("passkey-origin", os.Getenv("GIKI_PASSKEY_ORIGIN"),
+		"comma-separated origins a passkey ceremony may happen at, e.g.\n"+
+			"https://giki.example.org (default $GIKI_PASSKEY_ORIGIN). Defaults\n"+
+			"to https://<passkey-domain> when unset.")
+	registerToken := flag.String("register-token", os.Getenv("GIKI_REGISTER_TOKEN"),
+		"token required to register a passkey for a NEW account (default\n"+
+			"$GIKI_REGISTER_TOKEN). Already signed-in users need no token to\n"+
+			"add another authenticator. Unset means new accounts are closed,\n"+
+			"which is the right default while giki has no authorization.")
 	webRoot := flag.String("web-root", os.Getenv("GIKI_WEB_ROOT"),
 		"directory holding the built Flutter web app; serves it on the same\n"+
 			"origin as the API, which is what a production deployment wants\n"+
@@ -56,16 +71,21 @@ func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(logger)
 
-	authenticator, err := buildAuth(*tokens, *devUser, logger)
-	if err != nil {
-		return err
-	}
-
 	st, err := store.Open(*dbPath)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
+
+	passkeys, err := buildPasskeys(*passkeyDomain, *passkeyOrigins, st, logger)
+	if err != nil {
+		return err
+	}
+
+	authenticator, err := buildAuth(st, *tokens, *devUser, passkeys != nil, logger)
+	if err != nil {
+		return err
+	}
 
 	cursor, err := st.Cursor(context.Background())
 	if err != nil {
@@ -79,6 +99,14 @@ func run() error {
 	}
 
 	var opts []syncapi.Option
+	if passkeys != nil {
+		opts = append(opts, syncapi.WithPasskeys(passkeys, *registerToken))
+		if *registerToken == "" {
+			logger.Info("passkeys enabled; new accounts are closed (no -register-token)")
+		} else {
+			logger.Info("passkeys enabled; new accounts may be registered with the token")
+		}
+	}
 	if *webRoot != "" {
 		// Fail here rather than serving 500s: a typo in this path would
 		// otherwise look like a broken deployment.
@@ -133,19 +161,73 @@ func run() error {
 	}
 }
 
-func buildAuth(tokens, devUser string, logger *slog.Logger) (auth.Authenticator, error) {
-	switch {
-	case devUser != "" && tokens != "":
-		return nil, errors.New("-dev-user and -tokens are mutually exclusive")
-	case devUser != "":
-		logger.Warn("INSECURE: -dev-user authenticates every request",
-			"user_id", devUser)
-		return auth.OpenDev{UserID: devUser}, nil
-	case tokens != "":
-		return auth.ParseTokens(tokens)
-	default:
-		return nil, errors.New("no authentication configured: pass -tokens (or $GIKI_TOKENS), or -dev-user for local development")
+// buildPasskeys configures the WebAuthn relying party, or returns nil when
+// -passkey-domain was not given.
+func buildPasskeys(domain, origins string, st *store.Store, logger *slog.Logger) (*passkey.Service, error) {
+	if domain == "" {
+		return nil, nil
 	}
+	if strings.Contains(domain, "/") || strings.Contains(domain, ":") {
+		return nil, fmt.Errorf("-passkey-domain %q must be a bare domain, without scheme or port", domain)
+	}
+
+	var list []string
+	for _, origin := range strings.Split(origins, ",") {
+		if trimmed := strings.TrimSpace(origin); trimmed != "" {
+			list = append(list, trimmed)
+		}
+	}
+	if len(list) == 0 {
+		// The overwhelmingly common case, and getting it wrong is a confusing
+		// browser-side error rather than a server one.
+		list = []string{"https://" + domain}
+		logger.Info("no -passkey-origin given; assuming one", "origin", list[0])
+	}
+
+	service, err := passkey.New(passkey.Config{
+		RPID:        domain,
+		DisplayName: "giki",
+		Origins:     list,
+	}, st)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("passkeys configured", "domain", domain, "origins", list)
+	return service, nil
+}
+
+// buildAuth assembles the ways a request may prove who it is.
+//
+// A chain rather than a choice: a passkey session and an operator's static
+// token are both legitimate, and the sync endpoints should not care which one
+// a request brought.
+func buildAuth(st *store.Store, tokens, devUser string, passkeysEnabled bool, logger *slog.Logger) (auth.Authenticator, error) {
+	if devUser != "" && tokens != "" {
+		return nil, errors.New("-dev-user and -tokens are mutually exclusive")
+	}
+
+	var chain auth.Chain
+	if tokens != "" {
+		static, err := auth.ParseTokens(tokens)
+		if err != nil {
+			return nil, err
+		}
+		chain = append(chain, static)
+	}
+	if passkeysEnabled {
+		chain = append(chain, auth.NewSessions(st))
+	}
+	// Last: it accepts everything, so anything after it would be unreachable.
+	if devUser != "" {
+		logger.Warn("INSECURE: -dev-user authenticates every request", "user_id", devUser)
+		chain = append(chain, auth.OpenDev{UserID: devUser})
+	}
+
+	if len(chain) == 0 {
+		return nil, errors.New("no authentication configured: pass -passkey-domain for passkeys, " +
+			"-tokens (or $GIKI_TOKENS) for static tokens, or -dev-user for local development")
+	}
+	return chain, nil
 }
 
 // parseOrigins splits the -cors-origin list and refuses the ones that would
