@@ -93,12 +93,14 @@ Known gaps, roughly in the order they will start to hurt:
   local dead-letter table.
 * **No full-text search.** The obvious answer is an FTS5 table derived locally
   on both sides, like `links`.
-* **The passkey ceremonies are not exercised in a browser.** They are tested
-  against a real software authenticator in Go
+* **The passkey ceremonies are not exercised in a browser *in CI*.** They are
+  tested against a real software authenticator in Go
   (`internal/syncapi/authapi_test.go`), and the browser test checks that the
-  options the server produces are the options the client can convert. What is
-  missing in between is a ceremony driven through Chrome's virtual
-  authenticator, which needs the DevTools protocol from outside the page.
+  options the server produces are the options the client can convert. The
+  ceremony itself can now be run end to end by hand --
+  `tool/explore.mjs passkey "Register a passkey"` attaches Chrome's virtual
+  authenticator over the DevTools protocol -- but that is an exploratory tool,
+  not a test: nothing asserts, and CI does not run it.
 * **Clock trust.** See "What this protocol does not do" in
   [sync-protocol.md](sync-protocol.md).
 * **The end-to-end test covers the loop, not the UI.** `tool/e2e.sh` drives

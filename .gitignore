@@ -19,3 +19,4 @@ client/web/sqlite3.wasm
 .vscode/
 *.swp
 .DS_Store
+.explore/
