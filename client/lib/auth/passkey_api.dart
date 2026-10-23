@@ -8,6 +8,18 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+/// Ensures a base URL ends in a slash.
+///
+/// Without it `Uri.resolve('api/v1/...')` replaces the last path segment
+/// instead of appending: `https://host/giki` + `api/v1/sync` becomes
+/// `https://host/api/v1/sync`, which is a 404 that looks like a server bug.
+Uri normalizeBaseUrl(Uri baseUrl) {
+  if (baseUrl.path.endsWith('/')) {
+    return baseUrl;
+  }
+  return baseUrl.replace(path: '${baseUrl.path}/');
+}
+
 /// A WebAuthn ceremony the server has started.
 class Ceremony {
   const Ceremony({required this.id, required this.options});
@@ -64,9 +76,11 @@ class PasskeyException implements Exception {
 
 /// Talks to /api/v1/auth.
 class PasskeyApi {
-  PasskeyApi({required this.baseUrl, http.Client? httpClient})
-      : _http = httpClient ?? http.Client();
+  PasskeyApi({required Uri baseUrl, http.Client? httpClient})
+      : baseUrl = normalizeBaseUrl(baseUrl),
+        _http = httpClient ?? http.Client();
 
+  /// The server's base URL, always ending in a slash.
   final Uri baseUrl;
   final http.Client _http;
 
@@ -187,9 +201,15 @@ class PasskeyApi {
   Map<String, Object?> _decode(http.Response response) {
     Map<String, Object?> body = const {};
     if (response.body.isNotEmpty) {
-      final decoded = jsonDecode(response.body);
-      if (decoded is Map<String, Object?>) {
-        body = decoded;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, Object?>) {
+          body = decoded;
+        }
+      } on FormatException {
+        // A proxy's HTML error page, or a captive portal. Fall through to the
+        // status-based message rather than throwing something the UI cannot
+        // explain.
       }
     }
     if (response.statusCode >= 400) {

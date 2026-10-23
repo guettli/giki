@@ -30,8 +30,16 @@ class WebAuthnException implements Exception {
 
 /// Whether this browser exposes WebAuthn at all. False on plain HTTP origins
 /// other than localhost, because the API is restricted to secure contexts.
-bool get passkeysAvailable =>
-    (web.window as JSObject).has('PublicKeyCredential');
+bool get passkeysAvailable {
+  final window = web.window as JSObject;
+  // Both: PublicKeyCredential is the type check everyone writes, but
+  // navigator.credentials is what this file actually calls, and it is absent
+  // on an insecure origin.
+  if (!window.has('PublicKeyCredential')) {
+    return false;
+  }
+  return (web.window.navigator as JSObject).has('credentials');
+}
 
 /// Runs a registration ceremony and returns the response JSON for the server.
 Future<Map<String, Object?>> createCredential(
@@ -41,9 +49,9 @@ Future<Map<String, Object?>> createCredential(
 
   return registrationCredentialJson(
     id: credential.getProperty<JSString>('id'.toJS).toDart,
-    rawId: _bytes(credential, 'rawId')!,
-    clientDataJson: _bytes(response, 'clientDataJSON')!,
-    attestationObject: _bytes(response, 'attestationObject')!,
+    rawId: _require(credential, 'rawId'),
+    clientDataJson: _require(response, 'clientDataJSON'),
+    attestationObject: _require(response, 'attestationObject'),
     transports: _transports(response),
   );
 }
@@ -55,10 +63,12 @@ Future<Map<String, Object?>> getCredential(Map<String, Object?> options) async {
 
   return assertionCredentialJson(
     id: credential.getProperty<JSString>('id'.toJS).toDart,
-    rawId: _bytes(credential, 'rawId')!,
-    clientDataJson: _bytes(response, 'clientDataJSON')!,
-    authenticatorData: _bytes(response, 'authenticatorData')!,
-    signature: _bytes(response, 'signature')!,
+    rawId: _require(credential, 'rawId'),
+    clientDataJson: _require(response, 'clientDataJSON'),
+    authenticatorData: _require(response, 'authenticatorData'),
+    signature: _require(response, 'signature'),
+    // Optional by specification; the server refuses a login without it, which
+    // is a clearer failure than inventing an empty one here.
     userHandle: _bytes(response, 'userHandle'),
   );
 }
@@ -139,7 +149,23 @@ Uint8List? _bytes(JSObject source, String key) {
   if (value == null) {
     return null;
   }
-  return (value as JSArrayBuffer).toDart.asUint8List();
+  try {
+    return (value as JSArrayBuffer).toDart.asUint8List();
+  } on Object {
+    throw WebAuthnException('The browser returned an unreadable "$key".');
+  }
+}
+
+/// Reads a property the WebAuthn specification requires.
+///
+/// A missing one means the browser answered with something this code does not
+/// understand; saying that is more use than a TypeError from a null assertion.
+Uint8List _require(JSObject source, String key) {
+  final bytes = _bytes(source, key);
+  if (bytes == null) {
+    throw WebAuthnException('The browser\'s passkey response had no "$key".');
+  }
+  return bytes;
 }
 
 List<String> _transports(JSObject response) {

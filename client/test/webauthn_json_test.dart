@@ -135,7 +135,10 @@ void main() {
       );
       expect(response['attestationObject'], encodeBase64Url([3, 4]));
       expect(response['transports'], ['internal', 'hybrid']);
-      // The server rejects unknown fields, so the shape must be exactly this.
+      // Not because the server rejects unknown fields -- it hands `credential`
+      // to the WebAuthn library as raw JSON, which tolerates extras -- but
+      // because these five are what the library reads, and a missing one fails
+      // verification with no clue which.
       expect(json.keys.toSet(),
           {'id', 'rawId', 'type', 'response', 'clientExtensionResults'});
     });

@@ -155,6 +155,43 @@ void main() {
     expect(sent.single.url.path, '/api/v1/auth/logout');
   });
 
+  test('keeps a path prefix in the configured server URL', () async {
+    // Uri.resolve replaces the last segment unless the base ends in a slash,
+    // so a server behind a path would otherwise be asked for /api/v1/... at
+    // the domain root -- a 404 that looks like a server bug.
+    final sent = <http.Request>[];
+    final client = MockClient((request) async {
+      sent.add(request);
+      return http.Response(
+          jsonEncode({
+            'ceremony_id': 'c',
+            'options': {'challenge': 'AQ'}
+          }),
+          200);
+    });
+    final api =
+        PasskeyApi(baseUrl: Uri.parse('https://host/giki'), httpClient: client);
+
+    await api.beginLogin();
+
+    expect(sent.single.url.toString(),
+        'https://host/giki/api/v1/auth/passkey/login/begin');
+  });
+
+  test('reports a non-JSON error body as a passkey failure', () async {
+    // A proxy or captive portal answering with HTML must not surface as a
+    // FormatException the UI cannot explain.
+    final client =
+        MockClient((request) async => http.Response('<html>502</html>', 502));
+    final api = PasskeyApi(baseUrl: baseUrl, httpClient: client);
+
+    await expectLater(
+      api.beginLogin(),
+      throwsA(isA<PasskeyException>()
+          .having((e) => e.statusCode, 'statusCode', 502)),
+    );
+  });
+
   test('whoami reports the user and the method', () async {
     final fixture =
         apiReturning(jsonEncode({'user_id': 'alice', 'method': 'session'}));

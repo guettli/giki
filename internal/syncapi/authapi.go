@@ -76,7 +76,10 @@ func (s *Server) authorizeRegistration(r *http.Request, requested string) (userI
 		return "", false, fmt.Errorf("%w: new accounts are closed on this server (see -register-token)",
 			errForbidden)
 	}
-	presented, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	presented, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		return "", false, fmt.Errorf("%w: registration requires a bearer token", auth.ErrUnauthorized)
+	}
 	presented = strings.TrimSpace(presented)
 	if subtle.ConstantTimeCompare([]byte(presented), []byte(s.registerToken)) != 1 {
 		return "", false, fmt.Errorf("%w: registration requires a valid token", auth.ErrUnauthorized)
@@ -119,6 +122,30 @@ func (s *Server) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if newAccount {
+		// The registration token creates accounts; it does not join existing
+		// ones. Without this check anyone ever handed the token could attach
+		// their own authenticator to somebody else's account and then write as
+		// them -- which would also make the audit trail forgeable, the one
+		// property giki still claims while it has no authorization.
+		//
+		// Refused before BeginRegistration, because the ceremony options
+		// contain the account's WebAuthn handle and the ids of every
+		// authenticator it has registered.
+		exists, err := s.store.PasskeyUserExists(r.Context(), userID)
+		if err != nil {
+			s.fail(w, r, http.StatusInternalServerError, "could not check the account", err)
+			return
+		}
+		if exists {
+			s.log.WarnContext(r.Context(), "registration token used for an existing account",
+				"user_id", userID)
+			s.fail(w, r, http.StatusConflict,
+				"that account already exists; sign in with one of its passkeys and add another from there", nil)
+			return
+		}
+	}
+
 	ceremonyID, options, err := s.passkeys.BeginRegistration(r.Context(), userID, req.DisplayName)
 	if err != nil {
 		s.fail(w, r, http.StatusInternalServerError, "could not begin registration", err)
@@ -152,6 +179,9 @@ func (s *Server) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, passkey.ErrVerification):
 		s.fail(w, r, http.StatusBadRequest, "the authenticator's response did not verify", err)
+		return
+	case errors.Is(err, store.ErrCredentialClaimed):
+		s.fail(w, r, http.StatusConflict, "that authenticator is already registered to another account", err)
 		return
 	case err != nil:
 		s.fail(w, r, http.StatusInternalServerError, "could not finish registration", err)
@@ -297,27 +327,23 @@ func (s *Server) handleDeletePasskey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	remaining, err := s.store.PasskeysByUser(r.Context(), identity.UserID)
-	if err != nil {
-		s.fail(w, r, http.StatusInternalServerError, "could not list passkeys", err)
-		return
-	}
-	if len(remaining) <= 1 {
-		// Removing the last one would lock the account out of its own data,
-		// and there is no password to fall back on.
+	// The count, the delete and the session revocation happen in one
+	// transaction inside the store: two concurrent removals must not each
+	// conclude that a key is spare, and a credential must never outlive the
+	// sessions it issued.
+	err = s.store.DeletePasskey(r.Context(), id, identity.UserID)
+	switch {
+	case errors.Is(err, store.ErrLastPasskey):
+		// There is no password to fall back on, so this would be a locked-out
+		// account.
 		s.fail(w, r, http.StatusConflict,
 			"this is your only passkey; register another one before removing it", nil)
 		return
-	}
-
-	if err := s.store.DeletePasskey(r.Context(), id); err != nil {
-		s.fail(w, r, http.StatusInternalServerError, "could not delete passkey", err)
+	case errors.Is(err, store.ErrNotFound):
+		s.fail(w, r, http.StatusNotFound, "no such passkey", nil)
 		return
-	}
-	// A removed authenticator must not leave its sessions alive, or the
-	// removal only looks like a revocation.
-	if err := s.store.DeleteSessionsOfPasskey(r.Context(), id); err != nil {
-		s.fail(w, r, http.StatusInternalServerError, "could not revoke the passkey's sessions", err)
+	case err != nil:
+		s.fail(w, r, http.StatusInternalServerError, "could not delete passkey", err)
 		return
 	}
 	s.log.InfoContext(r.Context(), "passkey removed", "user_id", identity.UserID, "passkey_id", id)

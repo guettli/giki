@@ -28,6 +28,11 @@ class _SettingsPageState extends State<SettingsPage> {
       TextEditingController(text: widget.db.meta(MetaKeys.serverUrl) ?? '');
   late final TextEditingController _user =
       TextEditingController(text: widget.db.meta(MetaKeys.userId) ?? '');
+  // A second controller for the Advanced section: both text fields are built
+  // at once (an ExpansionTile builds its children even while collapsed), and
+  // sharing one controller shares its selection and focus.
+  late final TextEditingController _advancedUser =
+      TextEditingController(text: widget.db.meta(MetaKeys.userId) ?? '');
   final TextEditingController _displayName = TextEditingController();
   final TextEditingController _registerToken = TextEditingController();
   final TextEditingController _staticToken = TextEditingController();
@@ -50,6 +55,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     _url.dispose();
     _user.dispose();
+    _advancedUser.dispose();
     _displayName.dispose();
     _registerToken.dispose();
     _staticToken.dispose();
@@ -122,8 +128,10 @@ class _SettingsPageState extends State<SettingsPage> {
             ceremonyId: ceremony.id,
             credential: credential,
           );
-          _storeSession(session);
-          setState(() => _status = 'Signed in as ${session.userId}.');
+          await _storeSession(session);
+          if (mounted) {
+            setState(() => _status = 'Signed in as ${session.userId}.');
+          }
           await _refreshPasskeys();
         } finally {
           api.close();
@@ -165,10 +173,12 @@ class _SettingsPageState extends State<SettingsPage> {
             authorization: authorization,
             label: _deviceLabel(),
           );
-          _storeSession(session);
+          await _storeSession(session);
           _registerToken.clear();
-          setState(() =>
-              _status = 'Passkey registered. Signed in as ${session.userId}.');
+          if (mounted) {
+            setState(() => _status =
+                'Passkey registered. Signed in as ${session.userId}.');
+          }
           await _refreshPasskeys();
         } finally {
           api.close();
@@ -177,27 +187,74 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _signOut() => _guard(() async {
         final token = widget.db.meta(MetaKeys.token) ?? '';
-        final api = _api();
-        if (api == null) {
-          return;
-        }
-        try {
-          if (token.isNotEmpty) {
-            // Best effort: the session is useless locally either way, and a
-            // server that cannot be reached must not block signing out.
-            try {
-              await api.logout(token);
-            } on Object {
-              // ignored on purpose; the local token is cleared below
-            }
-          }
-          widget.db.setMeta(MetaKeys.token, '');
+
+        // Local first, and unconditionally. Pressing "Sign out" must not leave
+        // the device signed in because the URL is blank or the server is
+        // unreachable -- a silent, surprising outcome.
+        await _clearSession();
+        if (mounted) {
           setState(() {
             _passkeys = const [];
             _status = 'Signed out. Your pages stay on this device.';
           });
+        }
+
+        // Then tell the server, best effort: that is what stops the session
+        // being usable elsewhere.
+        final uri = _serverUri;
+        if (token.isEmpty || uri == null) {
+          return;
+        }
+        final api = PasskeyApi(baseUrl: uri);
+        try {
+          await api.logout(token);
+        } on Object {
+          if (mounted) {
+            setState(() => _status =
+                'Signed out on this device. The server could not be reached, '
+                    'so its session expires on its own.');
+          }
         } finally {
           api.close();
+        }
+      });
+
+  /// Saves the operator settings: a static token, the user id, the URL.
+  ///
+  /// Replacing a passkey session with a static token revokes the session
+  /// first, or it would keep working for weeks with no way for the user to
+  /// reach it.
+  Future<void> _saveAdvanced() => _guard(() async {
+        final uri = _serverUri;
+        final previous = widget.db.meta(MetaKeys.token) ?? '';
+        final replacement = _staticToken.text.trim();
+
+        if (replacement.isNotEmpty &&
+            previous.isNotEmpty &&
+            previous != replacement &&
+            uri != null) {
+          final api = PasskeyApi(baseUrl: uri);
+          try {
+            await api.logout(previous);
+          } on Object {
+            // An unreachable server, or a token that was never a session:
+            // neither should block saving.
+          } finally {
+            api.close();
+          }
+        }
+
+        if (replacement.isNotEmpty) {
+          widget.db.setMeta(MetaKeys.token, replacement);
+          widget.db.setMeta(MetaKeys.passkeyId, '');
+        }
+        widget.db.setMeta(MetaKeys.userId, _advancedUser.text.trim());
+        if (uri != null) {
+          widget.db.setMeta(MetaKeys.serverUrl, uri.toString());
+        }
+        await widget.db.flush();
+        if (mounted) {
+          setState(() => _status = 'Saved.');
         }
       });
 
@@ -221,10 +278,30 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  void _storeSession(PasskeySession session) {
+  /// Persists a freshly issued session.
+  ///
+  /// The flush matters: on the IndexedDB file system -- which is the path in
+  /// use until the database moves into a worker -- writes stay in memory until
+  /// something flushes them. Without this, signing in survives only until the
+  /// first successful background sync, and signing out would not survive a
+  /// reload at all.
+  Future<void> _storeSession(PasskeySession session) async {
     widget.db.setMeta(MetaKeys.token, session.token);
     widget.db.setMeta(MetaKeys.userId, session.userId);
-    _user.text = session.userId;
+    widget.db.setMeta(MetaKeys.passkeyId, session.passkeyId);
+    await widget.db.flush();
+    if (mounted) {
+      _user.text = session.userId;
+      _advancedUser.text = session.userId;
+    }
+  }
+
+  /// Clears the local session. Deliberately independent of the server: a
+  /// sign-out must work offline, and with a server URL that does not parse.
+  Future<void> _clearSession() async {
+    widget.db.setMeta(MetaKeys.token, '');
+    widget.db.setMeta(MetaKeys.passkeyId, '');
+    await widget.db.flush();
   }
 
   /// A label so a passkey list reads as devices rather than hashes.
@@ -243,12 +320,33 @@ class _SettingsPageState extends State<SettingsPage> {
             widget.db.meta(MetaKeys.token) ?? '',
             passkey.id,
           );
-          setState(() => _status = 'Removed ${passkey.label}.');
+
+          // The server revokes the sessions a removed passkey issued, which
+          // includes this one if the user removed the key they signed in with.
+          // Keeping the dead token would leave the page claiming to be signed
+          // in while every request 401s.
+          if (passkey.id == (widget.db.meta(MetaKeys.passkeyId) ?? '')) {
+            await _clearSession();
+            if (mounted) {
+              setState(() {
+                _passkeys = const [];
+                _status = 'Removed ${_name(passkey)}. That was this device\'s '
+                    'passkey, so you are signed out here.';
+              });
+            }
+            return;
+          }
+          if (mounted) {
+            setState(() => _status = 'Removed ${_name(passkey)}.');
+          }
           await _refreshPasskeys();
         } finally {
           api.close();
         }
       });
+
+  String _name(PasskeyInfo passkey) =>
+      passkey.label.isEmpty ? 'that passkey' : passkey.label;
 
   @override
   Widget build(BuildContext context) {
@@ -405,22 +503,12 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 8),
               TextField(
-                controller: _user,
+                controller: _advancedUser,
                 decoration: const InputDecoration(labelText: 'User id'),
               ),
               const SizedBox(height: 12),
               OutlinedButton(
-                onPressed: () {
-                  if (_staticToken.text.trim().isNotEmpty) {
-                    widget.db.setMeta(MetaKeys.token, _staticToken.text.trim());
-                  }
-                  widget.db.setMeta(MetaKeys.userId, _user.text.trim());
-                  final uri = _serverUri;
-                  if (uri != null) {
-                    widget.db.setMeta(MetaKeys.serverUrl, uri.toString());
-                  }
-                  setState(() => _status = 'Saved.');
-                },
+                onPressed: _busy ? null : _saveAdvanced,
                 child: const Text('Save'),
               ),
               const SizedBox(height: 16),

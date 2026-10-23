@@ -125,8 +125,14 @@ Creating an account is gated by `-register-token`, and deliberately so: giki
 has authentication but no authorization yet, so everyone who can sign in can
 read and write everything. Open registration on a public URL would therefore
 be the same thing as no authentication at all. Hand the token to the person
-registering; they need it once. Adding a second authenticator (a phone, a
-hardware key) needs no token, only an existing session.
+registering; they need it once.
+
+The token creates accounts and nothing else. Naming an account that already
+exists is refused, because otherwise anyone ever handed the token could attach
+their own authenticator to somebody else's account -- and then write as them,
+which would make the audit trail forgeable. Adding a second authenticator (a
+phone, a hardware key) needs no token, only an existing session, and only for
+one's own account.
 
 A successful ceremony issues an opaque bearer session, which the client sends
 on every sync request. Not a cookie: the sync API is a POST with a JSON body,
@@ -143,7 +149,7 @@ Flags worth knowing:
 | --- | --- |
 | `-passkey-domain` | The domain credentials are bound to, e.g. `giki.example.org`. Enables the WebAuthn endpoints. |
 | `-passkey-origin` | Origins a ceremony may happen at. Defaults to `https://<passkey-domain>`. |
-| `-register-token` | Required to register a *new* account. Unset means new accounts are closed. |
+| `-register-token` | Required to create a *new* account, and refused for an account that already exists. Unset means new accounts are closed. |
 | `-tokens` | Static `token:user` pairs for scripts. |
 | `-web-root` | Serve the PWA from this server, on one origin. |
 

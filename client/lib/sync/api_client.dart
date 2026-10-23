@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../auth/passkey_api.dart' show normalizeBaseUrl;
 import '../db/models.dart';
 
 /// What the server made of one pushed mutation.
@@ -63,9 +64,11 @@ class SyncApiException implements Exception {
 /// Talks to POST /api/v1/sync.
 class SyncApiClient {
   SyncApiClient(
-      {required this.baseUrl, required this.token, http.Client? httpClient})
-      : _http = httpClient ?? http.Client();
+      {required Uri baseUrl, required this.token, http.Client? httpClient})
+      : baseUrl = normalizeBaseUrl(baseUrl),
+        _http = httpClient ?? http.Client();
 
+  /// The server's base URL, always ending in a slash; see normalizeBaseUrl.
   final Uri baseUrl;
   final String token;
   final http.Client _http;

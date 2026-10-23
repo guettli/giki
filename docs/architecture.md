@@ -68,8 +68,10 @@ Known gaps, roughly in the order they will start to hurt:
   scripts. A ceremony issues an opaque bearer session rather than setting a
   cookie: the sync API is a POST with a JSON body, so a cookie would make it
   reachable from any page the user visits, while a bearer token cannot be read
-  cross-origin. Only the SHA-256 of a session is stored, so a leaked database
-  hands out no working sessions.
+  cross-origin. Only the SHA-256 of a session is stored -- and likewise of an
+  in-flight ceremony handle, which is the sole authorization for the
+  unauthenticated `register/finish` -- so a leaked database hands out neither
+  working sessions nor half-finished registrations.
 
   What is still missing is session management worth the name: a user cannot
   list or revoke their sessions, only the one device they are holding. Removing

@@ -174,4 +174,13 @@ if [ "${syncs:-0}" -lt 4 ]; then
     echo "the server handled only ${syncs:-0} sync requests: the test did not really run" >&2
     exit 1
 fi
-echo "ok: the server handled $syncs sync requests"
+
+# Same reasoning for the passkey phases: "All tests passed" is an aggregate,
+# and a suite that silently skipped them would still print it. The server logs
+# one line per registration ceremony it starts.
+ceremonies=$(grep -c 'msg="passkey registration begun"' "$workdir/server.log" || true)
+if [ "${ceremonies:-0}" -lt 1 ]; then
+    echo "the passkey phases did not reach the server: the test did not really run" >&2
+    exit 1
+fi
+echo "ok: the server handled $syncs sync requests and $ceremonies passkey ceremonies"

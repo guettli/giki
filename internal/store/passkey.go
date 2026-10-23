@@ -124,25 +124,56 @@ func (s *Store) PasskeyUserByHandle(ctx context.Context, handle []byte) (Passkey
 	return PasskeyUser{UserID: userID, Handle: handle, DisplayName: displayName}, nil
 }
 
-// PasskeyUserCount reports how many users have registered a passkey. Used to
-// decide whether an instance still needs its bootstrap registration token.
-func (s *Store) PasskeyUserCount(ctx context.Context) (int, error) {
-	var count int
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM passkey_users`).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count passkey users: %w", err)
+// PasskeyUserExists reports whether userID has ever registered a passkey.
+//
+// The registration gate needs this: a token that could name an existing
+// account would let anyone who was ever invited to sign up attach their own
+// authenticator to somebody else's account, and then write as them.
+func (s *Store) PasskeyUserExists(ctx context.Context, userID string) (bool, error) {
+	var one int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT 1 FROM passkey_users WHERE user_id = ?`, userID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
 	}
-	return count, nil
+	if err != nil {
+		return false, fmt.Errorf("look up passkey user: %w", err)
+	}
+	return true, nil
 }
 
+// ErrCredentialClaimed means the credential ID is already registered to
+// another account.
+var ErrCredentialClaimed = errors.New("credential already registered to another user")
+
 // SavePasskey stores a newly registered credential.
+//
+// A credential ID that already belongs to someone else is refused rather than
+// reassigned. The ID comes from attested credential data, and with attestation
+// conveyance "none" nothing vouches for it, so a caller who can register at
+// all could otherwise steal a victim's authenticator row by claiming its ID --
+// locking the victim out if it was their only one.
+//
+// `user_id` is deliberately absent from the conflict update for the same
+// reason: re-registering the same authenticator refreshes its key material,
+// never its owner.
 func (s *Store) SavePasskey(ctx context.Context, p Passkey) error {
-	_, err := s.DB.ExecContext(ctx, `
+	var owner string
+	err := s.DB.QueryRowContext(ctx, `SELECT user_id FROM passkeys WHERE id = ?`, p.ID).Scan(&owner)
+	switch {
+	case err == nil && owner != p.UserID:
+		return fmt.Errorf("%w: %s", ErrCredentialClaimed, p.ID)
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("read passkey owner: %w", err)
+	}
+
+	_, err = s.DB.ExecContext(ctx, `
 		INSERT INTO passkeys (id, user_id, label, credential, created_at, last_used_at)
 		VALUES (?, ?, ?, ?, ?, '')
 		ON CONFLICT (id) DO UPDATE SET
-			user_id    = excluded.user_id,
 			label      = excluded.label,
-			credential = excluded.credential`,
+			credential = excluded.credential
+		WHERE passkeys.user_id = excluded.user_id`,
 		p.ID, p.UserID, p.Label, string(p.Credential), Now())
 	if err != nil {
 		return fmt.Errorf("save passkey: %w", err)
@@ -207,10 +238,64 @@ func (s *Store) TouchPasskey(ctx context.Context, id string, credential []byte) 
 	return nil
 }
 
-// DeletePasskey removes one credential.
-func (s *Store) DeletePasskey(ctx context.Context, id string) error {
-	if _, err := s.DB.ExecContext(ctx, `DELETE FROM passkeys WHERE id = ?`, id); err != nil {
+// ErrLastPasskey means the credential is the account's only one.
+var ErrLastPasskey = errors.New("cannot remove the account's last passkey")
+
+// DeletePasskey removes one credential and revokes the sessions it issued,
+// refusing to remove an account's last one.
+//
+// All three in one transaction, for two reasons. The count and the delete must
+// not be separate statements: two concurrent removals would each see two
+// credentials remaining and both proceed, leaving an account with none and no
+// password to fall back on. And a revocation that failed after the delete
+// committed would leave the credential gone but its sessions alive -- the
+// opposite of what removing an authenticator is for.
+func (s *Store) DeletePasskey(ctx context.Context, id, userID string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+
+	// Ownership first. A credential that is not the caller's is "not found",
+	// and answering that before the last-passkey rule keeps the two refusals
+	// from leaking into each other: otherwise a caller with no passkeys at all
+	// would be told "this is your only passkey" about somebody else's.
+	var owned int
+	err = tx.QueryRowContext(ctx,
+		`SELECT 1 FROM passkeys WHERE id = ? AND user_id = ?`, id, userID).Scan(&owned)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read passkey: %w", err)
+	}
+
+	var remaining int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM passkeys WHERE user_id = ?`, userID).Scan(&remaining); err != nil {
+		return fmt.Errorf("count passkeys: %w", err)
+	}
+	if remaining <= 1 {
+		return ErrLastPasskey
+	}
+
+	result, err := tx.ExecContext(ctx, `DELETE FROM passkeys WHERE id = ? AND user_id = ?`, id, userID)
+	if err != nil {
 		return fmt.Errorf("delete passkey: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete passkey: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM api_sessions WHERE passkey_id = ?`, id); err != nil {
+		return fmt.Errorf("revoke sessions of passkey: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
@@ -227,7 +312,7 @@ func (s *Store) SaveCeremony(ctx context.Context, kind, userID string, session [
 	if kind != "register" && kind != "login" {
 		return "", fmt.Errorf("unknown ceremony kind %q", kind)
 	}
-	id, _, err := NewToken()
+	handle, hash, err := NewToken()
 	if err != nil {
 		return "", err
 	}
@@ -236,20 +321,27 @@ func (s *Store) SaveCeremony(ctx context.Context, kind, userID string, session [
 		`DELETE FROM passkey_ceremonies WHERE expires_at < ?`, now.Format(TimeFormat)); err != nil {
 		return "", fmt.Errorf("prune ceremonies: %w", err)
 	}
+	// The hash, not the handle: /register/finish is unauthenticated and the
+	// handle is its only authorization, so a handle read out of the database
+	// (or a backup, or a log) would let somebody finish another person's
+	// registration with their own authenticator. Same reasoning as
+	// api_sessions.
 	_, err = s.DB.ExecContext(ctx, `
 		INSERT INTO passkey_ceremonies (id, kind, user_id, session, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
-		id, kind, userID, string(session),
+		hash, kind, userID, string(session),
 		now.Format(TimeFormat), now.Add(CeremonyTTL).Format(TimeFormat))
 	if err != nil {
 		return "", fmt.Errorf("save ceremony: %w", err)
 	}
-	return id, nil
+	return handle, nil
 }
 
 // TakeCeremony returns a ceremony and deletes it, so a challenge can only be
 // answered once -- a replayed response finds nothing to verify against.
-func (s *Store) TakeCeremony(ctx context.Context, id, kind string) (userID string, session []byte, err error) {
+func (s *Store) TakeCeremony(ctx context.Context, handle, kind string) (userID string, session []byte, err error) {
+	hash := HashToken(handle)
+
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("begin: %w", err)
@@ -258,7 +350,7 @@ func (s *Store) TakeCeremony(ctx context.Context, id, kind string) (userID strin
 
 	var storedKind, storedSession, expires string
 	err = tx.QueryRowContext(ctx,
-		`SELECT kind, user_id, session, expires_at FROM passkey_ceremonies WHERE id = ?`, id).
+		`SELECT kind, user_id, session, expires_at FROM passkey_ceremonies WHERE id = ?`, hash).
 		Scan(&storedKind, &userID, &storedSession, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil, ErrNotFound
@@ -266,8 +358,21 @@ func (s *Store) TakeCeremony(ctx context.Context, id, kind string) (userID strin
 	if err != nil {
 		return "", nil, fmt.Errorf("read ceremony: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM passkey_ceremonies WHERE id = ?`, id); err != nil {
+
+	// The DELETE, not the SELECT, is what makes a ceremony single-use: only
+	// the transaction that actually removed the row may continue. Checking the
+	// row count keeps that guarantee here rather than resting on the
+	// connection pool's isolation.
+	result, err := tx.ExecContext(ctx, `DELETE FROM passkey_ceremonies WHERE id = ?`, hash)
+	if err != nil {
 		return "", nil, fmt.Errorf("consume ceremony: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return "", nil, fmt.Errorf("consume ceremony: %w", err)
+	}
+	if affected != 1 {
+		return "", nil, ErrNotFound
 	}
 	if err := tx.Commit(); err != nil {
 		return "", nil, fmt.Errorf("commit: %w", err)
@@ -303,6 +408,12 @@ func (s *Store) CreateSession(ctx context.Context, userID, passkeyID, label stri
 	}
 	now := time.Now().UTC()
 	expiresAt = now.Add(SessionTTL).Format(TimeFormat)
+	// Sessions are otherwise only pruned when their own token is presented
+	// again, so an abandoned one would sit in the table forever.
+	if _, err := s.DB.ExecContext(ctx,
+		`DELETE FROM api_sessions WHERE expires_at < ?`, now.Format(TimeFormat)); err != nil {
+		return "", "", fmt.Errorf("prune sessions: %w", err)
+	}
 	_, err = s.DB.ExecContext(ctx, `
 		INSERT INTO api_sessions (token_sha256, user_id, passkey_id, label, created_at, last_seen_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -337,10 +448,12 @@ func (s *Store) LookupSession(ctx context.Context, token string) (Session, error
 		}
 		return Session{}, ErrNotFound
 	}
-	if _, err := s.DB.ExecContext(ctx,
-		`UPDATE api_sessions SET last_seen_at = ? WHERE token_sha256 = ?`, now, hash); err != nil {
-		return Session{}, fmt.Errorf("touch session: %w", err)
-	}
+	// last_seen_at is diagnostics. A failure here (a locked database, a
+	// read-only filesystem) must not turn a valid session into a failed
+	// request -- and because the authenticator chain treats a non-auth error
+	// as fatal, it would also stop any other credential from being tried.
+	_, _ = s.DB.ExecContext(ctx,
+		`UPDATE api_sessions SET last_seen_at = ? WHERE token_sha256 = ?`, now, hash)
 	return session, nil
 }
 
@@ -353,17 +466,6 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 	return nil
 }
 
-// DeleteSessionsOfPasskey revokes every session that a given credential
-// created. Removing a lost authenticator has to log out the devices it signed
-// in, or the removal is theatre.
-func (s *Store) DeleteSessionsOfPasskey(ctx context.Context, passkeyID string) error {
-	if _, err := s.DB.ExecContext(ctx,
-		`DELETE FROM api_sessions WHERE passkey_id = ?`, passkeyID); err != nil {
-		return fmt.Errorf("delete sessions of passkey: %w", err)
-	}
-	return nil
-}
-
 // EnsureSyncedUser creates the app-level `users` row for a newly registered
 // account, so every client learns the display name through the ordinary delta
 // feed.
@@ -371,16 +473,27 @@ func (s *Store) DeleteSessionsOfPasskey(ctx context.Context, passkeyID string) e
 // It never overwrites an existing row: registering a second passkey must not
 // undo a display name the user has since changed in the app.
 func (s *Store) EnsureSyncedUser(ctx context.Context, userID, displayName string) error {
-	var existing string
-	err := s.DB.QueryRowContext(ctx, `SELECT id FROM users WHERE id = ?`, userID).Scan(&existing)
+	// A live row is left exactly as it is: registering a second passkey must
+	// not undo a display name the user has since changed in the app.
+	var storedClock string
+	var deleted int
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT updated_at, is_deleted FROM users WHERE id = ?`, userID).Scan(&storedClock, &deleted)
 	switch {
-	case err == nil:
+	case err == nil && deleted == 0:
 		return nil
-	case !errors.Is(err, sql.ErrNoRows):
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("read user %s: %w", userID, err)
 	}
 
-	now := Now()
+	// A user who was deleted in the app and registers again must come back,
+	// or they could authenticate and write while being a nameless tombstone in
+	// everybody's copy of the knowledge base.
+	//
+	// The clock has to beat the tombstone's, and "now" is not guaranteed to:
+	// Last-Write-Wins keeps the stored row on an equal timestamp, and a
+	// deletion that happened in the same millisecond would silently win.
+	now := afterClock(storedClock)
 	payload, err := json.Marshal(map[string]any{
 		"id":           userID,
 		"display_name": displayName,
@@ -406,8 +519,27 @@ func (s *Store) EnsureSyncedUser(ctx context.Context, userID, displayName string
 	if err != nil {
 		return err
 	}
-	if results[0].Status == StatusRejected {
-		return fmt.Errorf("could not create user %s: %s", userID, results[0].Reason)
+	// Stale as well as rejected: both mean the row the clients will see is not
+	// the one this function promised to write, and silence would make the
+	// promise untrue in exactly the case it exists for.
+	if status := results[0].Status; status != StatusApplied {
+		return fmt.Errorf("could not write user %s: %s (%s)", userID, status, results[0].Reason)
 	}
 	return nil
+}
+
+// afterClock returns a timestamp strictly later than stored, and never earlier
+// than now. An empty stored clock just gives now.
+func afterClock(stored string) string {
+	now := Now()
+	if stored == "" || stored < now {
+		return now
+	}
+	parsed, err := time.Parse(TimeFormat, stored)
+	if err != nil {
+		// An unparseable stored clock cannot be reasoned about; now is the
+		// best available answer, and LWW will decide.
+		return now
+	}
+	return parsed.Add(time.Millisecond).Format(TimeFormat)
 }

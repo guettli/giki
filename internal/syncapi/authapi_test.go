@@ -109,11 +109,21 @@ func (f *passkeyFixture) do(t *testing.T, method, path, token string, body any) 
 	return res.StatusCode, decoded
 }
 
-// register runs a full registration ceremony and returns the issued session
-// token plus the credential the authenticator now holds.
+// registered is what a completed registration ceremony leaves behind.
+type registered struct {
+	// Token is the session the ceremony issued.
+	Token string
+	// Credential is what the authenticator now holds.
+	Credential virtualwebauthn.Credential
+	// Handle is the account's WebAuthn user handle, which a discoverable
+	// login resolves the user by.
+	Handle []byte
+}
+
+// register runs a full registration ceremony.
 func (f *passkeyFixture) register(t *testing.T, authenticator *virtualwebauthn.Authenticator,
 	userID, displayName, authorization, label string,
-) (string, virtualwebauthn.Credential) {
+) registered {
 	t.Helper()
 	status, body := f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/begin", authorization,
 		map[string]string{"user_id": userID, "display_name": displayName})
@@ -128,12 +138,11 @@ func (f *passkeyFixture) register(t *testing.T, authenticator *virtualwebauthn.A
 		t.Fatalf("parse attestation options: %v (%s)", err, options)
 	}
 	credential := virtualwebauthn.NewCredential(virtualwebauthn.KeyTypeEC2)
-	// Remember the handle the server minted for this account, so later
-	// assertions carry it the way a real authenticator would. parsed.UserID is
-	// the decoded handle, not the user id.
-	if !authenticator.Options.UserNotPresent {
-		authenticator.Options.UserHandle = []byte(parsed.UserID)
-	}
+	// Carry the handle the server minted for this account, the way a real
+	// authenticator stores it alongside the credential. parsed.UserID is the
+	// decoded handle, not the user id.
+	handle := []byte(parsed.UserID)
+	authenticator.Options.UserHandle = handle
 	response := virtualwebauthn.CreateAttestationResponse(f.rp, *authenticator, credential, *parsed)
 
 	status, body = f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/finish", authorization,
@@ -151,7 +160,7 @@ func (f *passkeyFixture) register(t *testing.T, authenticator *virtualwebauthn.A
 	if token == "" {
 		t.Fatalf("register/finish returned no token: %v", body)
 	}
-	return token, credential
+	return registered{Token: token, Credential: credential, Handle: handle}
 }
 
 // login runs a full discoverable login and returns the issued session token.
@@ -212,7 +221,7 @@ func TestPasskeyRegisterThenLogin(t *testing.T) {
 	f := newPasskeyServer(t)
 	authenticator := virtualwebauthn.NewAuthenticator()
 
-	sessionToken, _ := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop")
+	sessionToken := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop").Token
 
 	// The session works on the API, and says who it belongs to.
 	status, body := f.do(t, http.MethodGet, "/api/v1/auth/whoami", sessionToken, nil)
@@ -256,7 +265,7 @@ func TestPasskeyRegisterThenLogin(t *testing.T) {
 func TestPasskeySessionAuthenticatesSync(t *testing.T) {
 	f := newPasskeyServer(t)
 	authenticator := virtualwebauthn.NewAuthenticator()
-	sessionToken, _ := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop")
+	sessionToken := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop").Token
 
 	// Push a node with the passkey session rather than a static token.
 	payload, _ := json.Marshal(map[string]any{
@@ -324,7 +333,7 @@ func TestPasskeyRegistrationIsGated(t *testing.T) {
 func TestPasskeySessionCannotRegisterForAnotherUser(t *testing.T) {
 	f := newPasskeyServer(t)
 	authenticator := virtualwebauthn.NewAuthenticator()
-	sessionToken, _ := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop")
+	sessionToken := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop").Token
 
 	// Alice is signed in, so she may add her own keys...
 	status, _ := f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/begin", sessionToken,
@@ -412,7 +421,7 @@ func TestPasskeyLoginRejectsAnotherRelyingParty(t *testing.T) {
 func TestPasskeyListAndDelete(t *testing.T) {
 	f := newPasskeyServer(t)
 	authenticator := virtualwebauthn.NewAuthenticator()
-	sessionToken, _ := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop")
+	sessionToken := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop").Token
 
 	status, body := f.do(t, http.MethodGet, "/api/v1/auth/passkeys", sessionToken, nil)
 	if status != http.StatusOK {
@@ -426,8 +435,13 @@ func TestPasskeyListAndDelete(t *testing.T) {
 	if first["label"] != "laptop" {
 		t.Errorf("label = %v, want laptop", first["label"])
 	}
-	if _, leaked := first["credential"]; leaked {
-		t.Error("the list endpoint returned key material")
+	// The exact key set, not the absence of one name: a leak under
+	// "public_key" or "credential_id" would pass an absence check.
+	wantKeys := map[string]bool{"id": true, "label": true, "created_at": true, "last_used_at": true}
+	for key := range first {
+		if !wantKeys[key] {
+			t.Errorf("the list endpoint returned an unexpected field %q", key)
+		}
 	}
 	onlyID, _ := first["id"].(string)
 
@@ -439,7 +453,7 @@ func TestPasskeyListAndDelete(t *testing.T) {
 
 	// With a second one registered, removing the first is allowed, and the
 	// sessions it issued die with it.
-	secondToken, _ := f.register(t, &authenticator, "alice", "", sessionToken, "phone")
+	secondToken := f.register(t, &authenticator, "alice", "", sessionToken, "phone").Token
 	if status, _ = f.do(t, http.MethodDelete, "/api/v1/auth/passkeys/"+onlyID, secondToken, nil); status != http.StatusNoContent {
 		t.Fatalf("deleting a passkey = %d, want 204", status)
 	}
@@ -450,9 +464,131 @@ func TestPasskeyListAndDelete(t *testing.T) {
 		t.Errorf("the surviving session = %d, want 200", status)
 	}
 
-	// Somebody else's passkey is invisible rather than forbidden.
+	// An id that no longer exists.
 	if status, _ = f.do(t, http.MethodDelete, "/api/v1/auth/passkeys/"+onlyID, secondToken, nil); status != http.StatusNotFound {
-		t.Errorf("deleting an unknown passkey = %d, want 404", status)
+		t.Errorf("deleting an already-removed passkey = %d, want 404", status)
+	}
+}
+
+// TestPasskeyIsolationBetweenUsers exercises the ownership checks, which need
+// two accounts to mean anything at all.
+func TestPasskeyIsolationBetweenUsers(t *testing.T) {
+	f := newPasskeyServer(t)
+
+	aliceAuth := virtualwebauthn.NewAuthenticator()
+	aliceSession := f.register(t, &aliceAuth, "alice", "Alice", registerToken, "alice-laptop").Token
+	bobAuth := virtualwebauthn.NewAuthenticator()
+	bobSession := f.register(t, &bobAuth, "bob", "Bob", registerToken, "bob-laptop").Token
+	// Bob needs a spare, so a refusal to delete cannot be the last-passkey
+	// rule standing in for the ownership check.
+	f.register(t, &bobAuth, "bob", "", bobSession, "bob-phone")
+
+	// Each list shows only its owner's keys.
+	_, body := f.do(t, http.MethodGet, "/api/v1/auth/passkeys", aliceSession, nil)
+	aliceKeys, _ := body["passkeys"].([]any)
+	if len(aliceKeys) != 1 {
+		t.Fatalf("alice sees %d passkeys, want only her own", len(aliceKeys))
+	}
+	_, body = f.do(t, http.MethodGet, "/api/v1/auth/passkeys", bobSession, nil)
+	bobKeys, _ := body["passkeys"].([]any)
+	if len(bobKeys) != 2 {
+		t.Fatalf("bob sees %d passkeys, want his two", len(bobKeys))
+	}
+	bobFirst, _ := bobKeys[0].(map[string]any)
+	bobPasskeyID, _ := bobFirst["id"].(string)
+	for _, key := range aliceKeys {
+		if entry, _ := key.(map[string]any); entry["id"] == bobPasskeyID {
+			t.Error("alice's list contains one of bob's passkeys")
+		}
+	}
+
+	// Alice cannot remove one of bob's, and is told nothing about it.
+	status, _ := f.do(t, http.MethodDelete, "/api/v1/auth/passkeys/"+bobPasskeyID, aliceSession, nil)
+	if status != http.StatusNotFound {
+		t.Errorf("alice deleting bob's passkey = %d, want 404", status)
+	}
+	// And it is still there.
+	if _, body = f.do(t, http.MethodGet, "/api/v1/auth/passkeys", bobSession, nil); len(body["passkeys"].([]any)) != 2 {
+		t.Error("bob lost a passkey to alice's request")
+	}
+	// Bob's sessions survived too.
+	if status, _ := f.do(t, http.MethodGet, "/api/v1/auth/whoami", bobSession, nil); status != http.StatusOK {
+		t.Errorf("bob's session = %d, want 200", status)
+	}
+}
+
+// TestRegistrationTokenCannotJoinAnExistingAccount is the regression test for
+// the hole this closes: with the token alone, naming an existing account used
+// to attach your authenticator to it -- and make its audit trail forgeable.
+func TestRegistrationTokenCannotJoinAnExistingAccount(t *testing.T) {
+	f := newPasskeyServer(t)
+	victimAuth := virtualwebauthn.NewAuthenticator()
+	f.register(t, &victimAuth, "alice", "Alice", registerToken, "victim-laptop")
+
+	status, body := f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/begin", registerToken,
+		map[string]string{"user_id": "alice"})
+	if status != http.StatusConflict {
+		t.Fatalf("register/begin for an existing account = %d, want 409 (%v)", status, body)
+	}
+	// And the refusal must come before the ceremony exists, because the
+	// options would disclose the account's handle and its credential ids.
+	if _, leaked := body["options"]; leaked {
+		t.Error("the refusal disclosed the account's ceremony options")
+	}
+	if _, leaked := body["ceremony_id"]; leaked {
+		t.Error("the refusal still started a ceremony")
+	}
+
+	// The legitimate route is unaffected: a different account still works.
+	status, _ = f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/begin", registerToken,
+		map[string]string{"user_id": "bob"})
+	if status != http.StatusOK {
+		t.Errorf("register/begin for a new account = %d, want 200", status)
+	}
+}
+
+// TestPasskeyCannotBeStolenByCredentialID covers the other half: the
+// credential ID comes from attested data that nothing vouches for under
+// attestation "none", so claiming somebody else's must not move their row.
+func TestPasskeyCannotBeStolenByCredentialID(t *testing.T) {
+	f := newPasskeyServer(t)
+	victimAuth := virtualwebauthn.NewAuthenticator()
+	victim := f.register(t, &victimAuth, "alice", "Alice", registerToken, "victim-laptop")
+
+	thiefAuth := virtualwebauthn.NewAuthenticator()
+	thiefSession := f.register(t, &thiefAuth, "bob", "Bob", registerToken, "thief-laptop").Token
+
+	// Bob adds "another of his own" keys, but presents alice's credential id.
+	status, body := f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/begin", thiefSession,
+		map[string]string{"user_id": "bob"})
+	if status != http.StatusOK {
+		t.Fatalf("register/begin = %d: %v", status, body)
+	}
+	ceremonyID, _ := body["ceremony_id"].(string)
+	parsed, err := virtualwebauthn.ParseAttestationOptions(mustEncode(t, body["options"]))
+	if err != nil {
+		t.Fatalf("parse options: %v", err)
+	}
+	stolen := virtualwebauthn.NewCredential(virtualwebauthn.KeyTypeEC2)
+	stolen.ID = victim.Credential.ID
+	response := virtualwebauthn.CreateAttestationResponse(f.rp, thiefAuth, stolen, *parsed)
+
+	status, body = f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/finish", thiefSession,
+		map[string]any{"ceremony_id": ceremonyID, "credential": json.RawMessage(response)})
+	if status != http.StatusConflict {
+		t.Errorf("claiming another account's credential id = %d, want 409 (%v)", status, body)
+	}
+
+	// Alice still has her authenticator, and it still works.
+	stored, err := f.store.PasskeysByUser(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("PasskeysByUser: %v", err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("alice has %d passkeys, want 1", len(stored))
+	}
+	if status, _, _ := f.login(t, &victimAuth); status != http.StatusOK {
+		t.Error("alice can no longer sign in")
 	}
 }
 
@@ -481,7 +617,7 @@ func TestPasskeyDisabledWithoutConfiguration(t *testing.T) {
 func TestVirtualAuthenticatorProducesParseableCredential(t *testing.T) {
 	f := newPasskeyServer(t)
 	authenticator := virtualwebauthn.NewAuthenticator()
-	_, credential := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop")
+	credential := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop").Credential
 
 	stored, err := f.store.PasskeysByUser(t.Context(), "alice")
 	if err != nil {
@@ -528,9 +664,13 @@ func TestPasskeyLoginWithoutUserHandle(t *testing.T) {
 func TestPasskeyLoginRejectsUnknownCredential(t *testing.T) {
 	f := newPasskeyServer(t)
 	authenticator := virtualwebauthn.NewAuthenticator()
-	f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop")
+	alice := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop")
 
+	// The stranger claims alice's account -- correct handle, wrong key. The
+	// handle matters: without it go-webauthn refuses the assertion for being
+	// blank and the credential check this test is about never runs.
 	stranger := virtualwebauthn.NewAuthenticator()
+	stranger.Options.UserHandle = alice.Handle
 	stranger.AddCredential(virtualwebauthn.NewCredential(virtualwebauthn.KeyTypeEC2))
 
 	status, _, body := f.login(t, &stranger)

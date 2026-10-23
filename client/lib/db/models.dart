@@ -24,6 +24,10 @@ class MetaKeys {
 
   /// Bearer token for that server.
   static const String token = 'token';
+
+  /// The passkey that issued the current session, so that removing *that*
+  /// passkey can clear the session it is about to invalidate.
+  static const String passkeyId = 'passkey_id';
 }
 
 /// One drained row of sync_outbox, ready to be pushed.
