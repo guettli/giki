@@ -18,7 +18,14 @@ var ErrUnauthorized = errors.New("unauthorized")
 
 // Identity is the authenticated caller.
 type Identity struct {
+	// UserID is recorded as the author of every change the caller makes.
 	UserID string
+	// Method is how the caller proved who they are; see the Method constants.
+	Method string
+	// SessionToken is the presented session, set only for MethodSession, so
+	// that logging out can revoke exactly the session that asked. Never log
+	// this: it is a password equivalent.
+	SessionToken string
 }
 
 // Authenticator turns a request into an Identity.
@@ -65,12 +72,10 @@ func ParseTokens(spec string) (*StaticTokens, error) {
 
 // Authenticate reads an "Authorization: Bearer <token>" header.
 func (s *StaticTokens) Authenticate(r *http.Request) (Identity, error) {
-	header := r.Header.Get("Authorization")
-	token, ok := strings.CutPrefix(header, "Bearer ")
+	token, ok := bearer(r)
 	if !ok {
 		return Identity{}, fmt.Errorf("%w: missing bearer token", ErrUnauthorized)
 	}
-	token = strings.TrimSpace(token)
 	// Compared against every pair in constant time: a timing side channel here
 	// would leak the token one byte at a time.
 	match := ""
@@ -82,7 +87,7 @@ func (s *StaticTokens) Authenticate(r *http.Request) (Identity, error) {
 	if match == "" {
 		return Identity{}, fmt.Errorf("%w: unknown token", ErrUnauthorized)
 	}
-	return Identity{UserID: match}, nil
+	return Identity{UserID: match, Method: MethodStaticToken}, nil
 }
 
 // OpenDev authenticates every request as the same user. Insecure by design and
@@ -93,5 +98,5 @@ type OpenDev struct {
 
 // Authenticate always succeeds.
 func (d OpenDev) Authenticate(*http.Request) (Identity, error) {
-	return Identity{UserID: d.UserID}, nil
+	return Identity{UserID: d.UserID, Method: MethodDev}, nil
 }

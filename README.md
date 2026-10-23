@@ -31,6 +31,9 @@ still needs a web worker (see [docs/architecture.md](docs/architecture.md)).
 * **Multi-user with an audit trail.** Every accepted change is appended to a
   server-side ChangeLog with its author, its device and its timestamp. In a
   shared knowledge base, "who wrote this and when" is not a nice-to-have.
+* **Passkeys.** Sign in with a fingerprint, a face or a hardware key -- no
+  password to choose, forget or reuse, and nothing phishable: a credential is
+  bound to the server's domain by the browser itself.
 
 ## How it works
 
@@ -98,16 +101,51 @@ Flutter brings its own Dart SDK, so `dart` comes from that install.
 
 ```sh
 go build ./cmd/giki-server
-./giki-server -db giki.sqlite -tokens "s3cret:alice,hunter2:bob"
+./giki-server \
+  -db giki.sqlite \
+  -web-root client/build/web \
+  -passkey-domain giki.example.org \
+  -register-token "$(openssl rand -hex 24)"
 ```
-
-`-tokens` maps bearer tokens to user ids; those ids are what the audit trail
-records. For local hacking, `-dev-user alice` authenticates every request as
-`alice` and logs a warning saying so.
 
 ```sh
 curl localhost:8080/healthz
 ```
+
+For local hacking without a domain, `-dev-user alice` authenticates every
+request as `alice` and logs a warning saying so.
+
+## Signing in
+
+Passkeys are the way in. Open **Settings**, enter the server URL and press
+**Sign in with a passkey** -- there is no username field, because a passkey is
+a discoverable credential: the authenticator tells the server who you are.
+
+Creating an account is gated by `-register-token`, and deliberately so: giki
+has authentication but no authorization yet, so everyone who can sign in can
+read and write everything. Open registration on a public URL would therefore
+be the same thing as no authentication at all. Hand the token to the person
+registering; they need it once. Adding a second authenticator (a phone, a
+hardware key) needs no token, only an existing session.
+
+A successful ceremony issues an opaque bearer session, which the client sends
+on every sync request. Not a cookie: the sync API is a POST with a JSON body,
+and a cookie would make it reachable from any page the user visits. A bearer
+token cannot be used that way, because a cross-origin page cannot read it.
+
+`-tokens "s3cret:alice"` still maps static bearer tokens to user ids, for
+scripts and operators. Those ids are what the audit trail records, exactly as
+a passkey session's would be.
+
+Flags worth knowing:
+
+| Flag | What it does |
+| --- | --- |
+| `-passkey-domain` | The domain credentials are bound to, e.g. `giki.example.org`. Enables the WebAuthn endpoints. |
+| `-passkey-origin` | Origins a ceremony may happen at. Defaults to `https://<passkey-domain>`. |
+| `-register-token` | Required to register a *new* account. Unset means new accounts are closed. |
+| `-tokens` | Static `token:user` pairs for scripts. |
+| `-web-root` | Serve the PWA from this server, on one origin. |
 
 ### Client
 
@@ -142,7 +180,8 @@ with the database on a volume at `/data`.
 | `cmd/giki-server/` | The server binary: flags, logging, graceful shutdown. |
 | `internal/store/` | SQLite access, the table allowlist, and the Last-Write-Wins apply logic. |
 | `internal/syncapi/` | The HTTP endpoints and the wire format. |
-| `internal/auth/` | Bearer tokens to user ids. |
+| `internal/auth/` | Who is this request: static tokens, passkey sessions, and the chain that tries both. |
+| `internal/passkey/` | The WebAuthn ceremonies, over [go-webauthn](https://github.com/go-webauthn/webauthn). |
 | `internal/wikilink/` | `[[WikiLink]]` parsing, mirrored in Dart. |
 | `client/` | The Flutter Web PWA. |
 | `tool/` | `sync-schema.sh` copies the schema into the client's assets; `fetch-sqlite-wasm.sh` downloads the SQLite Wasm build; `e2e.sh` runs the browser test. |

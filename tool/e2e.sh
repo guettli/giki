@@ -23,6 +23,7 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 token=${GIKI_E2E_TOKEN:-e2e-token}
 user=${GIKI_E2E_USER:-alice}
+register_token=${GIKI_E2E_REGISTER_TOKEN:-e2e-register-token}
 chromedriver=${CHROMEDRIVER:-chromedriver}
 
 # Three ports have to be free, and one of them (the web port) has to be known
@@ -123,11 +124,20 @@ echo "starting the server on 127.0.0.1:$api_port"
 # cross-origin request and the server has to allow that one origin. Both
 # spellings of localhost are listed because the two are different origins to a
 # browser, and which one the page ends up on depends on flutter drive.
+# Passkeys are enabled with localhost as the relying party: browsers treat
+# http://localhost as a secure context, so WebAuthn is available there without
+# a certificate. The test cannot complete a ceremony (that needs a virtual
+# authenticator driven over CDP, which the test inside the page cannot reach),
+# but it does check that the options the server produces are the options the
+# client can digest -- which is where the two sides drift apart.
 "$workdir/giki-server" \
     -db "$workdir/giki.sqlite" \
     -addr "127.0.0.1:$api_port" \
     -tokens "$token:$user" \
     -cors-origin "http://localhost:$web_port,http://127.0.0.1:$web_port" \
+    -passkey-domain localhost \
+    -passkey-origin "http://localhost:$web_port,http://127.0.0.1:$web_port" \
+    -register-token "$register_token" \
     >"$workdir/server.log" 2>&1 &
 server_pid=$!
 wait_for "http://127.0.0.1:$api_port/healthz" "the giki server"
@@ -153,7 +163,8 @@ flutter drive \
     --timeout="${GIKI_E2E_TIMEOUT:-600}" \
     --dart-define=GIKI_E2E_SERVER="http://127.0.0.1:$api_port" \
     --dart-define=GIKI_E2E_TOKEN="$token" \
-    --dart-define=GIKI_E2E_USER="$user"
+    --dart-define=GIKI_E2E_USER="$user" \
+    --dart-define=GIKI_E2E_REGISTER_TOKEN="$register_token"
 
 # flutter drive has exited 0 before now without having run anything. The server
 # logs one line per sync round trip, and this test makes several, so an empty

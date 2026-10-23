@@ -315,3 +315,11 @@ func TestHealthz(t *testing.T) {
 		t.Errorf("server_time %q is not a giki timestamp: %v", body.ServerTime, err)
 	}
 }
+
+// newTestHTTPServer starts handler on a loopback listener and returns its URL.
+func newTestHTTPServer(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+	return ts.URL
+}

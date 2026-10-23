@@ -22,7 +22,11 @@
 
 import 'dart:convert';
 
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:giki/auth/webauthn.dart';
+import 'package:giki/auth/webauthn_json.dart';
 import 'package:giki/db/clock.dart';
 import 'package:giki/db/database.dart';
 import 'package:giki/db/repository.dart';
@@ -49,6 +53,10 @@ const String claimedUser = 'payload-claimed-user';
 /// A second device, simulated with plain HTTP calls. It is what makes this a
 /// multi-device test rather than a round trip to a mirror.
 const String otherDeviceId = 'e2e-second-device';
+
+/// The token tool/e2e.sh configures for registering a new account.
+const String e2eRegisterToken =
+    String.fromEnvironment('GIKI_E2E_REGISTER_TOKEN');
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -406,6 +414,8 @@ void main() {
     expect((tombstone['payload'] as Map<String, Object?>)['is_deleted'], 1);
   });
 
+  passkeyTests(baseUrl: () => baseUrl, registerToken: () => e2eRegisterToken);
+
   testWidgets('the app shell builds against the real local database', (
     tester,
   ) async {
@@ -417,5 +427,103 @@ void main() {
     expect(find.text('Study'), findsOneWidget);
     // The page that survived the earlier phases is listed.
     expect(find.text('Spaced Repetition'), findsWidgets);
+  });
+}
+
+/// Passkey phases.
+///
+/// What is checked here is the *contract* between the server's WebAuthn
+/// options and the client code that converts them for the browser API: the
+/// field names, the encodings, the shape. That is where the two sides drift
+/// apart in practice.
+///
+/// What is not checked is a complete ceremony. That needs a virtual
+/// authenticator, which is driven over the DevTools protocol from outside the
+/// page -- unreachable from a test running inside it. The ceremonies
+/// themselves are covered against a real software authenticator in
+/// internal/syncapi/authapi_test.go.
+void passkeyTests({
+  required Uri Function() baseUrl,
+  required String Function() registerToken,
+}) {
+  testWidgets('the server offers a login ceremony this client can digest', (
+    _,
+  ) async {
+    final response = await http.post(
+      baseUrl().resolve('api/v1/auth/passkey/login/begin'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    expect(response.statusCode, 200, reason: response.body);
+
+    final body = jsonDecode(response.body) as Map<String, Object?>;
+    expect(body['ceremony_id'], isA<String>());
+    final options = body['options']! as Map<String, Object?>;
+
+    // The real conversion, on the real server output, in a real browser.
+    final prepared = prepareRequestOptions(options);
+    expect(prepared['challenge'], isA<Uint8List>());
+    expect(
+      (prepared['challenge']! as Uint8List).length,
+      greaterThanOrEqualTo(16),
+      reason: 'a WebAuthn challenge must be at least 16 bytes',
+    );
+    expect(prepared['rpId'], 'localhost');
+    expect(
+      prepared.containsKey('allowCredentials'),
+      isFalse,
+      reason: 'a usernameless login must not restrict credentials',
+    );
+  });
+
+  testWidgets(
+      'the server offers a registration ceremony this client can digest', (
+    _,
+  ) async {
+    final response = await http.post(
+      baseUrl().resolve('api/v1/auth/passkey/register/begin'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${registerToken()}',
+      },
+      body: jsonEncode(
+          {'user_id': 'passkey-user', 'display_name': 'Passkey User'}),
+    );
+    expect(response.statusCode, 200, reason: response.body);
+
+    final body = jsonDecode(response.body) as Map<String, Object?>;
+    final options = body['options']! as Map<String, Object?>;
+    final prepared = prepareCreationOptions(options);
+
+    expect(prepared['challenge'], isA<Uint8List>());
+    final user = prepared['user']! as Map<String, Object?>;
+    expect(user['id'], isA<Uint8List>());
+    expect(
+      (user['id']! as Uint8List).length,
+      lessThanOrEqualTo(64),
+      reason: 'a WebAuthn user handle is at most 64 bytes',
+    );
+    expect(user['name'], 'passkey-user');
+    expect((prepared['rp']! as Map)['id'], 'localhost');
+
+    // A resident key is what makes the usernameless login above possible.
+    final selection =
+        prepared['authenticatorSelection']! as Map<String, Object?>;
+    expect(selection['residentKey'], 'required');
+  });
+
+  testWidgets('registration without the token is refused', (_) async {
+    final response = await http.post(
+      baseUrl().resolve('api/v1/auth/passkey/register/begin'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': 'intruder'}),
+    );
+    expect(response.statusCode, 401, reason: response.body);
+  });
+
+  testWidgets('the browser offers the WebAuthn API at all', (_) async {
+    // http://localhost is a secure context, so this must hold in CI. If it
+    // ever fails, passkeys are unavailable for a reason worth knowing about
+    // rather than a flaky test.
+    expect(passkeysAvailable, isTrue);
   });
 }
