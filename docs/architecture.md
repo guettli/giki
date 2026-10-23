@@ -83,7 +83,12 @@ Known gaps, roughly in the order they will start to hurt:
   on both sides, like `links`.
 * **Clock trust.** See "What this protocol does not do" in
   [sync-protocol.md](sync-protocol.md).
-* **No end-to-end test across a real browser.** The Go side is tested
-  thoroughly and the pure-Dart logic is unit-tested, but the full loop
-  (trigger → push → delta → local write) is only tested with a simulated
-  client, not a real PWA.
+* **The end-to-end test covers the loop, not the UI.** `tool/e2e.sh` drives
+  the real app in headless Chrome against a real server, so the full path
+  (trigger → outbox → push → delta → local write, including the echo guard and
+  both sides of Last-Write-Wins) is checked on every push. What it does not do
+  is drive the interface: it asserts one widget smoke test and otherwise works
+  through the repositories and the sync service.
+* **The OPFS path is not what CI exercises.** The test runs in a browser tab,
+  where OPFS is unavailable, so it covers the IndexedDB fallback. Testing the
+  OPFS path needs the worker above.

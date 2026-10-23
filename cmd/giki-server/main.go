@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -37,6 +38,10 @@ func run() error {
 	devUser := flag.String("dev-user", "",
 		"INSECURE: authenticate every request as this user, for local development")
 	logLevel := flag.String("log-level", "info", "debug, info, warn or error")
+	corsOrigins := flag.String("cors-origin", os.Getenv("GIKI_CORS_ORIGIN"),
+		"comma-separated origins allowed to call the API from a browser,\n"+
+			"e.g. http://localhost:8081 (default $GIKI_CORS_ORIGIN). Needed\n"+
+			"only when the PWA is served from a different origin than this server.")
 	flag.Parse()
 
 	level, err := parseLevel(*logLevel)
@@ -63,9 +68,18 @@ func run() error {
 	}
 	logger.Info("database ready", "path", *dbPath, "cursor", cursor)
 
+	origins, err := parseOrigins(*corsOrigins)
+	if err != nil {
+		return err
+	}
+	handler := syncapi.CORS(origins, syncapi.New(st, authenticator, logger).Routes())
+	if len(origins) > 0 {
+		logger.Info("cross-origin requests allowed", "origins", origins)
+	}
+
 	server := &http.Server{
 		Addr:              *addr,
-		Handler:           syncapi.New(st, authenticator, logger).Routes(),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -114,6 +128,32 @@ func buildAuth(tokens, devUser string, logger *slog.Logger) (auth.Authenticator,
 	default:
 		return nil, errors.New("no authentication configured: pass -tokens (or $GIKI_TOKENS), or -dev-user for local development")
 	}
+}
+
+// parseOrigins splits the -cors-origin list and refuses the ones that would
+// not work.
+//
+// "*" is rejected rather than ignored: it is matched against the Origin header,
+// which is never literally "*", so accepting it would log "cross-origin
+// requests allowed" and then fail every browser request -- the most confusing
+// possible outcome for whoever wrote it.
+func parseOrigins(spec string) ([]string, error) {
+	var origins []string
+	for _, origin := range strings.Split(spec, ",") {
+		origin = strings.TrimSpace(origin)
+		switch {
+		case origin == "":
+			continue
+		case origin == "*":
+			return nil, errors.New(`-cors-origin does not accept "*": list the exact origins, e.g. https://giki.example.org`)
+		case !strings.HasPrefix(origin, "http://") && !strings.HasPrefix(origin, "https://"):
+			return nil, fmt.Errorf("-cors-origin %q is not an origin: it must start with http:// or https://", origin)
+		case strings.HasSuffix(origin, "/"):
+			return nil, fmt.Errorf("-cors-origin %q must not end in a slash: a browser sends the origin without a path", origin)
+		}
+		origins = append(origins, origin)
+	}
+	return origins, nil
 }
 
 func parseLevel(name string) (slog.Level, error) {

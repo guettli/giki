@@ -141,7 +141,11 @@ your user id. Without them the app is simply local-only.
 go test ./...                  # server, schema and trigger behaviour
 cd client && flutter test      # timestamps, ids, scheduling, link parsing, protocol parsing
 tool/sync-schema.sh --check    # client schema copies are in step with db/
+tool/e2e.sh                    # the whole loop, in headless Chrome against a real server
 ```
+
+`tool/e2e.sh` needs `chromedriver` on the `PATH` (or `$CHROMEDRIVER`); it
+starts the server and the browser itself and cleans up after itself.
 
 `db/schema.sql` is the single source of truth for the shared tables. After
 changing it, update the column lists in `internal/store/registry.go` and the

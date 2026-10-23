@@ -60,6 +60,33 @@ jobs:
           sqlite3 /tmp/client.sqlite ".read db/schema.sql" ".read db/schema_client.sql"
           sqlite3 /tmp/server.sqlite ".read db/schema.sql" ".read db/schema_server.sql"
 
+  e2e:
+    name: End-to-end (browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          check-latest: true
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Browser versions
+        # Chrome and chromedriver come with the runner image. Printed so that a
+        # version skew between the two is visible in the log instead of showing
+        # up as an unexplained connection failure.
+        run: |
+          google-chrome --version
+          chromedriver --version
+      - run: cd client && flutter pub get
+      # On failure the script prints the server and chromedriver logs to
+      # stderr, so they are in this job's log -- no artifact to download.
+      - name: Run the end-to-end test
+        run: tool/e2e.sh
+
   client:
     name: Flutter client
     runs-on: ubuntu-latest
