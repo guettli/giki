@@ -34,9 +34,17 @@ class GikiDatabase {
   ///
   /// [wasmUrl] is served from the PWA's own origin; fetch it once with
   /// tool/fetch-sqlite-wasm.sh.
-  static Future<GikiDatabase> open({String wasmUrl = 'sqlite3.wasm'}) async {
+  ///
+  /// [storageName] names the browser-side storage holding the database file.
+  /// The default is what the app uses; the end-to-end test passes a fresh name
+  /// per run so it starts from an empty database instead of whatever the last
+  /// run left behind.
+  static Future<GikiDatabase> open({
+    String wasmUrl = 'sqlite3.wasm',
+    String storageName = 'giki',
+  }) async {
     final sqlite = await WasmSqlite3.loadFromUrl(Uri.parse(wasmUrl));
-    final (fileSystem, path) = await _openFileSystem();
+    final (fileSystem, path) = await _openFileSystem(storageName);
     sqlite.registerVirtualFileSystem(fileSystem, makeDefault: true);
 
     final db = sqlite.open(path);
@@ -66,12 +74,14 @@ class GikiDatabase {
   /// docs/architecture.md) this attempt fails in a normal tab and we fall back
   /// to the IndexedDB-backed file system, which is slower but correct and
   /// works everywhere.
-  static Future<(VirtualFileSystem, String)> _openFileSystem() async {
+  static Future<(VirtualFileSystem, String)> _openFileSystem(
+    String storageName,
+  ) async {
     try {
-      final opfs = await SimpleOpfsFileSystem.loadFromStorage('giki');
+      final opfs = await SimpleOpfsFileSystem.loadFromStorage(storageName);
       return (opfs, _opfsPath);
     } on Object {
-      final indexedDb = await IndexedDbFileSystem.open(dbName: 'giki');
+      final indexedDb = await IndexedDbFileSystem.open(dbName: storageName);
       return (indexedDb, _indexedDbPath);
     }
   }
