@@ -1,0 +1,123 @@
+# After CI passes on main, tag the commit v0.0.(PATCH+1) and publish a matching
+# container image to ghcr.io.
+#
+# Gating on CI (workflow_run) rather than on the push itself means a red commit
+# is never tagged or published. No GitHub Release is created: the tags are the
+# source of truth, and Renovate watches the image tags to bump the deployment
+# in the gitops repo.
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+# Never drop a release: if two CI runs finish back to back, queue them so each
+# gets its own tag.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+env:
+  # The commit CI actually validated. Under workflow_run there is no push SHA,
+  # and the workflow file's branch may already have moved past it.
+  HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  release:
+    name: Tag and publish
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          # Tags are needed to work out the next version.
+          fetch-depth: 0
+
+      - name: Work out the next version
+        id: version
+        run: |
+          set -euo pipefail
+          # Already released? A CI re-run must not produce a second tag for the
+          # same commit, and must not rebuild an image that exists.
+          if existing=$(git tag --points-at "$HEAD_SHA" | grep '^v' | head -n1) && [ -n "$existing" ]; then
+            echo "$HEAD_SHA is already tagged $existing; nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(git tag -l 'v*.*.*' | sort -V | tail -n1)
+          if [ -z "$latest" ]; then
+            next=v0.0.1
+          else
+            major=$(echo "${latest#v}" | cut -d. -f1)
+            minor=$(echo "${latest#v}" | cut -d. -f2)
+            patch=$(echo "${latest#v}" | cut -d. -f3)
+            next="v$major.$minor.$((patch + 1))"
+          fi
+          echo "releasing $next (previous: ${latest:-none})"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        if: steps.version.outputs.skip != 'true'
+        with:
+          channel: stable
+          cache: true
+
+      # The image copies a prebuilt bundle rather than running Flutter itself;
+      # see the comment in docker/Dockerfile.
+      - name: Build the web bundle
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          tool/fetch-sqlite-wasm.sh
+          cd client
+          flutter pub get
+          flutter build web --release
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.version.outputs.skip != 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.version.outputs.skip != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the image
+        if: steps.version.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          # amd64 only: the cluster is amd64, and building both arches roughly
+          # doubles the time until the Deployment can roll.
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.version.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Tagged last, so the tag means "an image for this commit exists". A
+      # failed build leaves the commit untagged and the next green run retries
+      # the same version number.
+      - name: Push the tag
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          git tag "${{ steps.version.outputs.tag }}" "$HEAD_SHA"
+          git push origin "${{ steps.version.outputs.tag }}"

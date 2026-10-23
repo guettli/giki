@@ -1,0 +1,10 @@
+# Keep the build context small. Note what is deliberately NOT excluded:
+# client/build/web, which docker/Dockerfile copies into the image.
+.git
+.github
+client/.dart_tool
+client/build/web/.last_build_id
+docs
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
