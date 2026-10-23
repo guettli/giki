@@ -416,6 +416,61 @@ void main() {
 
   passkeyTests(baseUrl: () => baseUrl, registerToken: () => e2eRegisterToken);
 
+  testWidgets('the sync badge follows the outbox, not the last rebuild', (
+    tester,
+  ) async {
+    // The badge is the only signal giki gives that work has not reached the
+    // server. It used to be read once per shell build, so an edit made in a
+    // child route left it saying "Sync now" with changes queued.
+    await tester.pumpWidget(GikiApp(db: db));
+    await tester.pumpAndSettle();
+    expect(db.pendingChanges.value, db.pendingCount);
+
+    final before = db.pendingChanges.value;
+    nodes.save(title: 'Badge Check', body: 'written without touching the UI');
+
+    // SQLite's update hook is asynchronous, so give it a turn -- that is also
+    // what the real app does between a save and the next frame.
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      db.pendingChanges.value,
+      before + 1,
+      reason: 'the outbox grew but the notifier did not follow',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('${db.pendingChanges.value}'), findsWidgets,
+        reason: 'the badge does not show the waiting changes');
+
+    // Clean up so the later phases see the state they expect.
+    nodes.delete(nodes.byTitle('Badge Check')!.id);
+    await sync.syncOnce();
+  });
+
+  testWidgets('text fields have an accessible name', (tester) async {
+    // Flutter renders InputDecoration's label as a sibling node, so without
+    // explicit semantics the editable element reaches assistive technology
+    // unnamed -- "edit text" and nothing else.
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(GikiApp(db: db));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('New page'));
+    await tester.pumpAndSettle();
+
+    for (final label in ['Title', 'Body']) {
+      expect(
+        find.bySemanticsLabel(label),
+        findsWidgets,
+        reason: 'the $label field announces nothing to a screen reader',
+      );
+    }
+
+    // Leave the editor as it was found.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    semantics.dispose();
+  });
+
   testWidgets('the app shell builds against the real local database', (
     tester,
   ) async {

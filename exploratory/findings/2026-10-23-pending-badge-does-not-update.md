@@ -1,6 +1,6 @@
 # The "changes waiting" badge does not update after an edit
 
-- **Found**: 2026-10-23 · **Charter**: 01-offline-first.md · **Status**: open
+- **Found**: 2026-10-23 · **Charter**: 01-offline-first.md · **Status**: fixed (`GikiDatabase.pendingChanges`, asserted in `integration_test/sync_flow_test.dart`)
 
 ## What happens
 
@@ -32,9 +32,18 @@ who closes the tab trusting "Sync now" has in fact left an unsynced edit
 behind. Nothing is lost -- the outbox survives -- but the one signal the app
 gives about sync state is wrong exactly when it matters.
 
-## The cause
+## The cause, and the fix
 
-`HomePage.build` reads `db.pendingCount` once per build, and editing happens
-in a child route that calls `setState` on `WikiPage`, which does not rebuild
-the shell above it. The count needs to be something the shell listens to --
-or the shell needs to re-read it when a route pops.
+`HomePage.build` read `db.pendingCount` once per build, and editing happens in
+a child route that calls `setState` on `WikiPage`, which does not rebuild the
+shell above it.
+
+The count is now a `ValueNotifier` fed by **SQLite's own update hook** on
+`sync_outbox`, and the badge is a `ValueListenableBuilder`. The hook rather
+than a `notify()` at each write site, because the outbox is written by
+*triggers*: the writes that matter are the ones no Dart code performs, and a
+hand-maintained count would be correct only until the next repository method
+forgot to announce itself -- which is how this bug happened in the first place.
+
+Verified in a browser from the reproduction above: the badge now reads
+`1 change(s) waiting` immediately after returning from the editor.

@@ -109,15 +109,21 @@ class _StudyPageState extends State<StudyPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: front,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Front'),
-            ),
-            TextField(
-              controller: back,
-              decoration: const InputDecoration(labelText: 'Back'),
-            ),
+            Semantics(
+                textField: true,
+                label: 'Front',
+                child: TextField(
+                  controller: front,
+                  autofocus: true,
+                  decoration: const InputDecoration(labelText: 'Front'),
+                )),
+            Semantics(
+                textField: true,
+                label: 'Back',
+                child: TextField(
+                  controller: back,
+                  decoration: const InputDecoration(labelText: 'Back'),
+                )),
           ],
         ),
         actions: [
