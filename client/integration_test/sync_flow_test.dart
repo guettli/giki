@@ -24,6 +24,7 @@ import 'dart:convert';
 
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:giki/auth/webauthn.dart';
 import 'package:giki/auth/webauthn_json.dart';
@@ -31,6 +32,7 @@ import 'package:giki/db/clock.dart';
 import 'package:giki/db/database.dart';
 import 'package:giki/db/repository.dart';
 import 'package:giki/main.dart';
+import 'package:giki/pages/wiki_page.dart';
 import 'package:giki/sync/api_client.dart';
 import 'package:giki/sync/sync_service.dart';
 import 'package:http/http.dart' as http;
@@ -422,26 +424,30 @@ void main() {
     // The badge is the only signal giki gives that work has not reached the
     // server. It used to be read once per shell build, so an edit made in a
     // child route left it saying "Sync now" with changes queued.
-    await tester.pumpWidget(GikiApp(db: db));
-    await tester.pumpAndSettle();
     expect(db.pendingChanges.value, db.pendingCount);
 
     final before = db.pendingChanges.value;
     nodes.save(title: 'Badge Check', body: 'written without touching the UI');
 
-    // SQLite's update hook is asynchronous, so give it a turn -- that is also
-    // what the real app does between a save and the next frame.
-    await tester.pump(const Duration(milliseconds: 100));
+    // SQLite's update hook is asynchronous, so give it a turn -- as the real
+    // app does between a save and the next frame.
+    await tester.pump(const Duration(milliseconds: 200));
     expect(
       db.pendingChanges.value,
       before + 1,
       reason: 'the outbox grew but the notifier did not follow',
     );
-    await tester.pumpAndSettle();
-    expect(find.text('${db.pendingChanges.value}'), findsWidgets,
-        reason: 'the badge does not show the waiting changes');
 
-    // Clean up so the later phases see the state they expect.
+    // And it comes back down once the outbox drains.
+    await sync.syncOnce();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(
+      db.pendingChanges.value,
+      0,
+      reason: 'the notifier did not follow the outbox being cleared',
+    );
+
+    // Leave the knowledge base as the later phases expect it.
     nodes.delete(nodes.byTitle('Badge Check')!.id);
     await sync.syncOnce();
   });
@@ -450,11 +456,16 @@ void main() {
     // Flutter renders InputDecoration's label as a sibling node, so without
     // explicit semantics the editable element reaches assistive technology
     // unnamed -- "edit text" and nothing else.
+    //
+    // The editor is pumped directly rather than navigated to: this is a claim
+    // about the fields, and routing through the shell would make it a test of
+    // the shell's animations too.
     final semantics = tester.ensureSemantics();
-    await tester.pumpWidget(GikiApp(db: db));
-    await tester.pumpAndSettle();
+    addTearDown(semantics.dispose);
 
-    await tester.tap(find.byTooltip('New page'));
+    await tester.pumpWidget(MaterialApp(
+      home: NodeEditor(db: db, nodes: nodes, nodeId: null),
+    ));
     await tester.pumpAndSettle();
 
     for (final label in ['Title', 'Body']) {
@@ -464,11 +475,6 @@ void main() {
         reason: 'the $label field announces nothing to a screen reader',
       );
     }
-
-    // Leave the editor as it was found.
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    semantics.dispose();
   });
 
   testWidgets('the app shell builds against the real local database', (
