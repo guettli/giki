@@ -132,7 +132,7 @@ func (s *Server) handleRegisterBegin(w http.ResponseWriter, r *http.Request) {
 		// Refused before BeginRegistration, because the ceremony options
 		// contain the account's WebAuthn handle and the ids of every
 		// authenticator it has registered.
-		exists, err := s.store.PasskeyUserExists(r.Context(), userID)
+		exists, err := s.store.UserHasPasskey(r.Context(), userID)
 		if err != nil {
 			s.fail(w, r, http.StatusInternalServerError, "could not check the account", err)
 			return

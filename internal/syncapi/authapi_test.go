@@ -547,6 +547,41 @@ func TestRegistrationTokenCannotJoinAnExistingAccount(t *testing.T) {
 	}
 }
 
+// TestAbandonedRegistrationDoesNotReserveTheName is the regression test for a
+// bug exploratory testing found: beginning a ceremony creates the WebAuthn
+// record, so a user who dismissed the browser's passkey prompt could never
+// register that id again -- refused as "already exists", and impossible to
+// sign into because no credential was ever stored. Only database access could
+// free the name.
+func TestAbandonedRegistrationDoesNotReserveTheName(t *testing.T) {
+	f := newPasskeyServer(t)
+
+	// Begin, then walk away. This is one dismissed prompt.
+	status, body := f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/begin", registerToken,
+		map[string]string{"user_id": "alice", "display_name": "Alice"})
+	if status != http.StatusOK {
+		t.Fatalf("register/begin = %d: %v", status, body)
+	}
+	if taken, err := f.store.UserHasPasskey(t.Context(), "alice"); err != nil || taken {
+		t.Fatalf("UserHasPasskey after an abandoned begin = %v, %v; want false", taken, err)
+	}
+
+	// Trying again must work, all the way through.
+	authenticator := virtualwebauthn.NewAuthenticator()
+	session := f.register(t, &authenticator, "alice", "Alice", registerToken, "laptop")
+	if status, whoami := f.do(t, http.MethodGet, "/api/v1/auth/whoami", session.Token, nil); status != http.StatusOK ||
+		whoami["user_id"] != "alice" {
+		t.Errorf("whoami after re-registering = %d %v", status, whoami)
+	}
+
+	// And now that she really has a passkey, the gate closes behind her.
+	status, _ = f.do(t, http.MethodPost, "/api/v1/auth/passkey/register/begin", registerToken,
+		map[string]string{"user_id": "alice"})
+	if status != http.StatusConflict {
+		t.Errorf("register/begin for an account with a passkey = %d, want 409", status)
+	}
+}
+
 // TestPasskeyCannotBeStolenByCredentialID covers the other half: the
 // credential ID comes from attested data that nothing vouches for under
 // attestation "none", so claiming somebody else's must not move their row.

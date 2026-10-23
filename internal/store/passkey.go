@@ -124,20 +124,28 @@ func (s *Store) PasskeyUserByHandle(ctx context.Context, handle []byte) (Passkey
 	return PasskeyUser{UserID: userID, Handle: handle, DisplayName: displayName}, nil
 }
 
-// PasskeyUserExists reports whether userID has ever registered a passkey.
+// UserHasPasskey reports whether userID has at least one registered
+// authenticator.
 //
-// The registration gate needs this: a token that could name an existing
-// account would let anyone who was ever invited to sign up attach their own
-// authenticator to somebody else's account, and then write as them.
-func (s *Store) PasskeyUserExists(ctx context.Context, userID string) (bool, error) {
+// This, and not the presence of a passkey_users row, is what the registration
+// gate asks. Beginning a ceremony creates that row -- it has to, the handle
+// goes into the challenge -- so a registration the user abandoned by dismissing
+// the browser prompt would otherwise reserve the name forever: refused as
+// "already exists", yet impossible to sign into because no credential was ever
+// stored. Only someone with database access could free it.
+//
+// The security property is unchanged. An account with no credentials cannot be
+// signed into by anybody, so registering it is creating an account rather than
+// joining one.
+func (s *Store) UserHasPasskey(ctx context.Context, userID string) (bool, error) {
 	var one int
 	err := s.DB.QueryRowContext(ctx,
-		`SELECT 1 FROM passkey_users WHERE user_id = ?`, userID).Scan(&one)
+		`SELECT 1 FROM passkeys WHERE user_id = ? LIMIT 1`, userID).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("look up passkey user: %w", err)
+		return false, fmt.Errorf("look up passkeys of %s: %w", userID, err)
 	}
 	return true, nil
 }

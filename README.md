@@ -194,6 +194,18 @@ with the database on a volume at `/data`.
 | `docker/` | The image: Go binary plus the built PWA, served on one origin. |
 | `docs/` | Architecture and protocol notes, including the open questions. |
 
+## Exploratory testing
+
+```sh
+tool/explore.sh start      # disposable server, app and headless Chrome
+tool/explore.mjs open /
+```
+
+An agent drives the real app with `tool/explore.mjs` -- read the screen, click,
+type, screenshot, query the server's database, and complete real passkey
+ceremonies through a virtual authenticator. Charters and findings live in
+[exploratory/](exploratory/README.md).
+
 ## Development
 
 ```sh

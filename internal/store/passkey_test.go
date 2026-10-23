@@ -201,12 +201,22 @@ func TestEnsurePasskeyUserIsStable(t *testing.T) {
 		t.Errorf("unknown handle = %v, want ErrNotFound", err)
 	}
 
-	exists, err := st.PasskeyUserExists(ctx, "alice")
-	if err != nil || !exists {
-		t.Errorf("PasskeyUserExists(alice) = %v, %v; want true", exists, err)
+	// A WebAuthn record without credentials is an abandoned registration, not
+	// an account: beginning a ceremony creates the record, and dismissing the
+	// browser prompt leaves it behind. Treating that as "the account exists"
+	// would reserve the name forever -- refused as taken, impossible to sign
+	// into.
+	if taken, err := st.UserHasPasskey(ctx, "alice"); err != nil || taken {
+		t.Errorf("UserHasPasskey(alice) = %v, %v; want false before any credential", taken, err)
 	}
-	if exists, _ := st.PasskeyUserExists(ctx, "nobody"); exists {
-		t.Error("PasskeyUserExists invented an account")
+	if err := st.SavePasskey(ctx, Passkey{ID: "CRED-A", UserID: "alice", Credential: []byte(`{}`)}); err != nil {
+		t.Fatalf("SavePasskey: %v", err)
+	}
+	if taken, err := st.UserHasPasskey(ctx, "alice"); err != nil || !taken {
+		t.Errorf("UserHasPasskey(alice) = %v, %v; want true once she has one", taken, err)
+	}
+	if taken, _ := st.UserHasPasskey(ctx, "nobody"); taken {
+		t.Error("UserHasPasskey invented an account")
 	}
 	if _, err := st.EnsurePasskeyUser(ctx, "", ""); err == nil {
 		t.Error("EnsurePasskeyUser accepted an empty user id")
