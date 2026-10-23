@@ -1,0 +1,11 @@
+{
+  "name": "giki",
+  "short_name": "giki",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3f51b5",
+  "description": "Local-first wiki and spaced repetition. Works offline.",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false
+}

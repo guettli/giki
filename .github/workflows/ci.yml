@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Go server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          check-latest: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build -o /tmp/giki-server ./cmd/giki-server
+      - name: Smoke test the binary
+        run: |
+          /tmp/giki-server -db /tmp/smoke.sqlite -dev-user ci -addr 127.0.0.1:8080 &
+          server=$!
+          trap 'kill $server' EXIT
+          for _ in $(seq 1 50); do
+            if curl --silent --fail http://127.0.0.1:8080/healthz; then
+              exit 0
+            fi
+            sleep 0.2
+          done
+          echo "server did not become healthy"
+          exit 1
+
+  schema:
+    name: Schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Client asset copies are up to date
+        run: tool/sync-schema.sh --check
+      - name: Schema applies on a plain sqlite3
+        run: |
+          sqlite3 /tmp/client.sqlite ".read db/schema.sql" ".read db/schema_client.sql"
+          sqlite3 /tmp/server.sqlite ".read db/schema.sql" ".read db/schema_server.sql"
+      - name: Schema is idempotent
+        run: |
+          sqlite3 /tmp/client.sqlite ".read db/schema.sql" ".read db/schema_client.sql"
+          sqlite3 /tmp/server.sqlite ".read db/schema.sql" ".read db/schema_server.sql"
+
+  client:
+    name: Flutter client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # Informational until the tree has been through the formatter once: this
+      # repo was scaffolded on a machine without a Flutter SDK. Make it
+      # blocking after the first `dart format .` commit.
+      - run: dart format --output=none --set-exit-if-changed .
+        continue-on-error: true
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build the PWA
+        run: |
+          ../tool/fetch-sqlite-wasm.sh
+          flutter build web --release

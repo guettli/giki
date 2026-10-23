@@ -1,0 +1,32 @@
+name: giki
+description: giki -- local-first wiki and spaced repetition, as a Flutter Web PWA.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # SQLite compiled to WebAssembly, with an OPFS-backed virtual file system.
+  # This is the single source of truth on the client: the UI never waits for
+  # the network, it reads the local database.
+  sqlite3: ^3.7.1
+  http: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    # Copied verbatim from ../db by tool/sync-schema.sh. CI fails if the copies
+    # drift from the originals, which is what keeps client and server schemas
+    # identical.
+    - assets/db/
+# sqlite3.wasm is not an asset: it lives in web/, which Flutter copies to the
+# build output as-is, and is fetched by URL. tool/fetch-sqlite-wasm.sh puts it
+# there; it is not checked in.
