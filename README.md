@@ -121,6 +121,19 @@ flutter run -d chrome          # or: flutter build web --release
 Then open **Settings** in the app and enter the server URL, a bearer token and
 your user id. Without them the app is simply local-only.
 
+## Deployment
+
+In production the server also serves the app, from the same origin:
+
+```sh
+giki-server -db /data/giki.sqlite -web-root /srv/giki/web -tokens "$TOKEN:alice"
+```
+
+Same origin means the browser makes no cross-origin requests, so `-cors-origin`
+is for development only. `docker/Dockerfile` builds that arrangement into one
+image (`ghcr.io/guettli/giki`): the static Go binary plus the built web bundle,
+with the database on a volume at `/data`.
+
 ## Repository layout
 
 | Path | What is in it |
@@ -132,7 +145,8 @@ your user id. Without them the app is simply local-only.
 | `internal/auth/` | Bearer tokens to user ids. |
 | `internal/wikilink/` | `[[WikiLink]]` parsing, mirrored in Dart. |
 | `client/` | The Flutter Web PWA. |
-| `tool/` | `sync-schema.sh` copies the schema into the client's assets; `fetch-sqlite-wasm.sh` downloads the SQLite Wasm build. |
+| `tool/` | `sync-schema.sh` copies the schema into the client's assets; `fetch-sqlite-wasm.sh` downloads the SQLite Wasm build; `e2e.sh` runs the browser test. |
+| `docker/` | The image: Go binary plus the built PWA, served on one origin. |
 | `docs/` | Architecture and protocol notes, including the open questions. |
 
 ## Development

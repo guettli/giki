@@ -61,19 +61,33 @@ type SyncResponse struct {
 	ServerTime string `json:"server_time"`
 }
 
-// Server serves the sync API.
+// Server serves the sync API, and optionally the PWA itself.
 type Server struct {
-	store *store.Store
-	auth  auth.Authenticator
-	log   *slog.Logger
+	store   *store.Store
+	auth    auth.Authenticator
+	log     *slog.Logger
+	webRoot string
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithWebRoot serves the built Flutter app from dir, on the same origin as the
+// API. Without it the server answers only the API paths.
+func WithWebRoot(dir string) Option {
+	return func(s *Server) { s.webRoot = dir }
 }
 
 // New builds a Server. log may be nil.
-func New(st *store.Store, a auth.Authenticator, log *slog.Logger) *Server {
+func New(st *store.Store, a auth.Authenticator, log *slog.Logger, opts ...Option) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{store: st, auth: a, log: log}
+	s := &Server{store: st, auth: a, log: log}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Routes returns the full HTTP surface.
@@ -82,6 +96,18 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("GET /api/v1/history", s.handleHistory)
+	if s.webRoot != "" {
+		mux.Handle("GET /", WebUI(s.webRoot))
+		// Without this, a GET to an API path falls through to the app shell:
+		// ServeMux prefers the catch-all "GET /" over a pattern that matches
+		// the path but not the method, so "POST /api/v1/sync" does not produce
+		// its 405 any more. A client would then receive 200 and a page of HTML
+		// where it expects JSON -- the kind of answer that gets reported as
+		// "sync silently does nothing".
+		mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
+			s.fail(w, r, http.StatusMethodNotAllowed, "method not allowed", nil)
+		})
+	}
 	return mux
 }
 

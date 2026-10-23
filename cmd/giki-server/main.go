@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -37,6 +38,10 @@ func run() error {
 		`bearer tokens as "token:user,token:user" (default $GIKI_TOKENS)`)
 	devUser := flag.String("dev-user", "",
 		"INSECURE: authenticate every request as this user, for local development")
+	webRoot := flag.String("web-root", os.Getenv("GIKI_WEB_ROOT"),
+		"directory holding the built Flutter web app; serves it on the same\n"+
+			"origin as the API, which is what a production deployment wants\n"+
+			"(default $GIKI_WEB_ROOT, empty for API only)")
 	logLevel := flag.String("log-level", "info", "debug, info, warn or error")
 	corsOrigins := flag.String("cors-origin", os.Getenv("GIKI_CORS_ORIGIN"),
 		"comma-separated origins allowed to call the API from a browser,\n"+
@@ -72,7 +77,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	handler := syncapi.CORS(origins, syncapi.New(st, authenticator, logger).Routes())
+
+	var opts []syncapi.Option
+	if *webRoot != "" {
+		// Fail here rather than serving 500s: a typo in this path would
+		// otherwise look like a broken deployment.
+		index := filepath.Join(*webRoot, "index.html")
+		if _, err := os.Stat(index); err != nil {
+			return fmt.Errorf("-web-root %q has no index.html: %w", *webRoot, err)
+		}
+		opts = append(opts, syncapi.WithWebRoot(*webRoot))
+		logger.Info("serving the web app", "web_root", *webRoot)
+	}
+
+	handler := syncapi.CORS(origins, syncapi.New(st, authenticator, logger, opts...).Routes())
 	if len(origins) > 0 {
 		logger.Info("cross-origin requests allowed", "origins", origins)
 	}
