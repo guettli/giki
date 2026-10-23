@@ -69,7 +69,8 @@ class SyncService {
   bool _running = false;
 
   /// Fires after every successful round trip, so the UI can refresh.
-  final StreamController<SyncReport> _reports = StreamController<SyncReport>.broadcast();
+  final StreamController<SyncReport> _reports =
+      StreamController<SyncReport>.broadcast();
 
   /// Reports of completed round trips.
   Stream<SyncReport> get reports => _reports.stream;

@@ -45,7 +45,10 @@ class GikiDatabase {
     db.execute('PRAGMA foreign_keys = OFF;');
 
     // The schema files are the same bytes the Go server applies.
-    for (final asset in ['assets/db/schema.sql', 'assets/db/schema_client.sql']) {
+    for (final asset in [
+      'assets/db/schema.sql',
+      'assets/db/schema_client.sql'
+    ]) {
       db.execute(await rootBundle.loadString(asset));
     }
 
@@ -82,7 +85,7 @@ class GikiDatabase {
   }
 
   /// Closes the database.
-  void close() => raw.dispose();
+  void close() => raw.close();
 
   // --- sync_meta -----------------------------------------------------------
 
@@ -150,7 +153,7 @@ class GikiDatabase {
         stmt.execute([seq]);
       }
     } finally {
-      stmt.dispose();
+      stmt.close();
     }
   }
 

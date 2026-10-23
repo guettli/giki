@@ -11,8 +11,12 @@ final RegExp _linkPattern = RegExp(r'\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]');
 
 /// Maps a human title to its title_key: trimmed, inner whitespace collapsed,
 /// lowercased.
-String normalizeTitle(String title) =>
-    title.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).join(' ').toLowerCase();
+String normalizeTitle(String title) => title
+    .trim()
+    .split(RegExp(r'\s+'))
+    .where((p) => p.isNotEmpty)
+    .join(' ')
+    .toLowerCase();
 
 /// Returns the normalized title_keys referenced by [body], in first-seen order
 /// and without duplicates.

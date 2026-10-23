@@ -50,7 +50,8 @@ class _WikiPageState extends State<WikiPage> {
 
   Future<void> _edit(String? id) async {
     await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => NodeEditor(db: widget.db, nodes: widget.nodes, nodeId: id),
+      builder: (_) =>
+          NodeEditor(db: widget.db, nodes: widget.nodes, nodeId: id),
     ));
     if (mounted) {
       setState(() {});
@@ -81,9 +82,12 @@ class NodeEditor extends StatefulWidget {
 }
 
 class _NodeEditorState extends State<NodeEditor> {
-  late Node? _node = widget.nodeId == null ? null : widget.nodes.byId(widget.nodeId!);
-  late final TextEditingController _title = TextEditingController(text: _node?.title ?? '');
-  late final TextEditingController _body = TextEditingController(text: _node?.body ?? '');
+  late Node? _node =
+      widget.nodeId == null ? null : widget.nodes.byId(widget.nodeId!);
+  late final TextEditingController _title =
+      TextEditingController(text: _node?.title ?? '');
+  late final TextEditingController _body =
+      TextEditingController(text: _node?.body ?? '');
 
   @override
   void dispose() {
@@ -100,7 +104,8 @@ class _NodeEditorState extends State<NodeEditor> {
     );
     setState(() => _node = widget.nodes.byId(id));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Saved locally. It will sync in the background.')),
+      const SnackBar(
+          content: Text('Saved locally. It will sync in the background.')),
     );
   }
 
@@ -125,7 +130,8 @@ class _NodeEditorState extends State<NodeEditor> {
                 Navigator.of(context).pop();
               },
             ),
-          IconButton(tooltip: 'Save', icon: const Icon(Icons.check), onPressed: _save),
+          IconButton(
+              tooltip: 'Save', icon: const Icon(Icons.check), onPressed: _save),
         ],
       ),
       body: ListView(
@@ -197,7 +203,8 @@ class _NodeEditorState extends State<NodeEditor> {
     final existing = widget.nodes.byTitle(titleKey);
     final id = existing?.id ?? widget.nodes.save(title: titleKey, body: '');
     Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
-      builder: (_) => NodeEditor(db: widget.db, nodes: widget.nodes, nodeId: id),
+      builder: (_) =>
+          NodeEditor(db: widget.db, nodes: widget.nodes, nodeId: id),
     ));
   }
 }

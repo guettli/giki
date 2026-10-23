@@ -122,7 +122,8 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.only(left: 16, bottom: 4),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text(_status, style: Theme.of(context).textTheme.bodySmall),
+              child:
+                  Text(_status, style: Theme.of(context).textTheme.bodySmall),
             ),
           ),
         ),

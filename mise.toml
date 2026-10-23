@@ -1,0 +1,9 @@
+# Toolchain for giki. Install everything with:
+#
+#   mise install
+#
+# Flutter ships its own Dart SDK, so `dart` comes from the flutter install --
+# do not add a separate dart entry, it would shadow the matching one.
+[tools]
+go = "1.26"
+flutter = "3.47.7"

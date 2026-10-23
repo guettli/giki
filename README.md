@@ -86,6 +86,14 @@ the `nodes.body` column alone, not in the sync layer.
 
 ## Quick start
 
+The toolchain is pinned in `mise.toml` ([mise](https://mise.jdx.dev)):
+
+```sh
+mise install                   # Go and Flutter, at the versions CI uses
+```
+
+Flutter brings its own Dart SDK, so `dart` comes from that install.
+
 ### Server
 
 ```sh

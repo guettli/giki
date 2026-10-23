@@ -9,7 +9,8 @@ import '../db/models.dart';
 
 /// What the server made of one pushed mutation.
 class MutationResult {
-  const MutationResult({required this.clientSeq, required this.status, required this.reason});
+  const MutationResult(
+      {required this.clientSeq, required this.status, required this.reason});
 
   /// The local sync_outbox.seq this result refers to.
   final int clientSeq;
@@ -61,7 +62,8 @@ class SyncApiException implements Exception {
 
 /// Talks to POST /api/v1/sync.
 class SyncApiClient {
-  SyncApiClient({required this.baseUrl, required this.token, http.Client? httpClient})
+  SyncApiClient(
+      {required this.baseUrl, required this.token, http.Client? httpClient})
       : _http = httpClient ?? http.Client();
 
   final Uri baseUrl;

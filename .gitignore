@@ -10,11 +10,6 @@ client/.dart_tool/
 client/build/
 client/.flutter-plugins
 client/.flutter-plugins-dependencies
-# Deliberately ignored for now: nobody has run `flutter pub get` on this tree
-# yet, so there is no lockfile to commit. Once the first developer with a
-# Flutter SDK generates one, drop this line and commit it -- an application
-# should pin its dependencies.
-client/pubspec.lock
 
 # A build input, downloaded by tool/fetch-sqlite-wasm.sh
 client/web/sqlite3.wasm

@@ -15,7 +15,8 @@ void main() {
   test('parses links', () {
     expect(parseLinks('plain text'), isEmpty);
     expect(parseLinks('see [[Leitner]] and [[SM-2]]'), ['leitner', 'sm-2']);
-    expect(parseLinks('see [[Spaced Repetition|the method]]'), ['spaced repetition']);
+    expect(parseLinks('see [[Spaced Repetition|the method]]'),
+        ['spaced repetition']);
     expect(parseLinks('[[A]] then [[a]] again'), ['a']);
     expect(parseLinks('[[broken and [[Good]]'), ['good']);
     expect(parseLinks('[[]] [[ ]] [[Real]]'), ['real']);

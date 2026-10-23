@@ -29,7 +29,8 @@ class _StudyPageState extends State<StudyPage> {
     final due = widget.cards.due();
     if (due.isEmpty) {
       return Scaffold(
-        body: const Center(child: Text('Nothing due. Add a card or come back later.')),
+        body: const Center(
+            child: Text('Nothing due. Add a card or come back later.')),
         floatingActionButton: FloatingActionButton(
           onPressed: _addCard,
           tooltip: 'New card',
@@ -53,10 +54,12 @@ class _StudyPageState extends State<StudyPage> {
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   children: [
-                    Text(card.front, style: Theme.of(context).textTheme.headlineSmall),
+                    Text(card.front,
+                        style: Theme.of(context).textTheme.headlineSmall),
                     if (_revealed) ...[
                       const Divider(height: 32),
-                      Text(card.back, style: Theme.of(context).textTheme.titleMedium),
+                      Text(card.back,
+                          style: Theme.of(context).textTheme.titleMedium),
                     ],
                   ],
                 ),

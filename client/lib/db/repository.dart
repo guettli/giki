@@ -15,7 +15,8 @@ import 'ids.dart';
 
 /// A node as shown in lists.
 class NodeSummary {
-  const NodeSummary({required this.id, required this.title, required this.updatedAt});
+  const NodeSummary(
+      {required this.id, required this.title, required this.updatedAt});
 
   final String id;
   final String title;
@@ -182,7 +183,11 @@ class CardRepository {
   final GikiDatabase _db;
 
   /// Creates or updates a flashcard, optionally attached to a node.
-  String save({String? id, String nodeId = '', required String front, required String back}) {
+  String save(
+      {String? id,
+      String nodeId = '',
+      required String front,
+      required String back}) {
     final cardId = id ?? newId();
     final now = nowClock();
     _db.raw.execute(
@@ -245,7 +250,8 @@ class CardRepository {
         'SELECT id FROM srs_state WHERE card_id = ? AND user_id = ?',
         [card.cardId, _db.userId],
       );
-      final stateId = existing.isEmpty ? newId() : existing.first['id'] as String;
+      final stateId =
+          existing.isEmpty ? newId() : existing.first['id'] as String;
       _db.raw.execute(
         'INSERT INTO srs_state (id, card_id, user_id, box, interval_days, ease, '
         '                       reps, lapses, due_at, last_reviewed_at, '
@@ -256,8 +262,17 @@ class CardRepository {
         '  reps = excluded.reps, lapses = excluded.lapses, due_at = excluded.due_at, '
         '  last_reviewed_at = excluded.last_reviewed_at, updated_at = excluded.updated_at',
         [
-          stateId, card.cardId, _db.userId, next.box, next.intervalDays,
-          next.reps, next.lapses, formatClock(next.dueAt), clock, clock, clock,
+          stateId,
+          card.cardId,
+          _db.userId,
+          next.box,
+          next.intervalDays,
+          next.reps,
+          next.lapses,
+          formatClock(next.dueAt),
+          clock,
+          clock,
+          clock,
         ],
       );
       _db.raw.execute(
@@ -265,8 +280,15 @@ class CardRepository {
         '                        prev_box, next_box, created_at, updated_at, is_deleted) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
         [
-          newId(), card.cardId, _db.userId, clock, rating.value,
-          card.state.box, next.box, clock, clock,
+          newId(),
+          card.cardId,
+          _db.userId,
+          clock,
+          rating.value,
+          card.state.box,
+          next.box,
+          clock,
+          clock,
         ],
       );
       _db.raw.execute('COMMIT');
@@ -280,4 +302,5 @@ class CardRepository {
 /// Renders a row as JSON. Used by the debug view that shows what the outbox
 /// will push -- being able to read the sync payload in the UI and in the
 /// browser's Network tab is why giki speaks JSON.
-String debugJson(Object? value) => const JsonEncoder.withIndent('  ').convert(value);
+String debugJson(Object? value) =>
+    const JsonEncoder.withIndent('  ').convert(value);

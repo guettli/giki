@@ -32,8 +32,12 @@ enum Rating {
           orElse: () => throw ArgumentError('unknown rating $value'));
 }
 
-/// The interval, in days, of each Leitner box. Box 1 is "see it again today".
-const List<int> boxIntervalDays = [0, 1, 3, 7, 16, 35];
+/// The interval, in days, of each Leitner box, indexed by box number.
+///
+/// Index 0 is a placeholder: boxes are numbered from 1, so that the box number
+/// stored in srs_state.box reads the way a user would say it. Box 1 is 0 days
+/// -- a card you just failed comes back in the same session, not tomorrow.
+const List<int> boxIntervalDays = [0, 0, 1, 3, 7, 16, 35];
 
 /// The highest box; a card here is considered learned.
 int get maxBox => boxIntervalDays.length - 1;
