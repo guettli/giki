@@ -6,6 +6,9 @@
 /// reconciles this database with the server later.
 library;
 
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sqlite3/wasm.dart';
 
@@ -17,12 +20,28 @@ export 'models.dart';
 
 /// The local giki database.
 class GikiDatabase {
-  GikiDatabase._(this.raw, this._fileSystem);
+  GikiDatabase._(this.raw, this._fileSystem) {
+    // SQLite's own update hook, rather than a notify() call at every write
+    // site: the outbox is written by triggers, so the writes that matter are
+    // the ones no Dart code performs. A count maintained by hand would be
+    // correct only until the next repository method forgot to announce
+    // itself -- which is exactly how the badge came to be wrong.
+    _outboxWatch = raw.updates
+        .where((update) => update.tableName == 'sync_outbox')
+        .listen((_) => refreshPendingCount());
+  }
 
   /// The underlying SQLite handle. Exposed so repositories can run their own
   /// statements instead of this class growing a method per query.
   final CommonDatabase raw;
   final VirtualFileSystem _fileSystem;
+  late final StreamSubscription<SqliteUpdate> _outboxWatch;
+
+  /// How many mutations are waiting to be pushed, as something the UI can
+  /// listen to. The sync indicator is the only signal giki gives that work has
+  /// not reached the server, so it has to follow the outbox rather than
+  /// whatever the last rebuild happened to see.
+  final ValueNotifier<int> pendingChanges = ValueNotifier<int>(0);
 
   /// Where the database lives inside the virtual file system. SimpleOpfsFileSystem
   /// can only persist a file called `/database`, so that name is not ours to
@@ -62,6 +81,7 @@ class GikiDatabase {
 
     final giki = GikiDatabase._(db, fileSystem);
     giki._ensureDeviceId();
+    giki.refreshPendingCount();
     await giki.flush();
     return giki;
   }
@@ -95,7 +115,14 @@ class GikiDatabase {
   }
 
   /// Closes the database.
-  void close() => raw.close();
+  void close() {
+    unawaited(_outboxWatch.cancel());
+    pendingChanges.dispose();
+    raw.close();
+  }
+
+  /// Re-reads the outbox depth into [pendingChanges].
+  void refreshPendingCount() => pendingChanges.value = pendingCount;
 
   // --- sync_meta -----------------------------------------------------------
 

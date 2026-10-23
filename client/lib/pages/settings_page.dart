@@ -358,16 +358,19 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          TextField(
-            controller: _url,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              labelText: 'Server URL',
-              hintText: 'https://giki.example.org',
-              helperText:
-                  'Without a server, giki works offline on this device alone.',
-            ),
-          ),
+          Semantics(
+              textField: true,
+              label: 'Server URL',
+              child: TextField(
+                controller: _url,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'Server URL',
+                  hintText: 'https://giki.example.org',
+                  helperText:
+                      'Without a server, giki works offline on this device alone.',
+                ),
+              )),
           const SizedBox(height: 24),
 
           Text('Passkey', style: theme.textTheme.titleMedium),
@@ -428,27 +431,37 @@ class _SettingsPageState extends State<SettingsPage> {
               title: const Text('Register a new account'),
               childrenPadding: const EdgeInsets.symmetric(vertical: 8),
               children: [
-                TextField(
-                  controller: _user,
-                  decoration: const InputDecoration(
-                    labelText: 'User id',
-                    helperText: 'Recorded as the author of your changes.',
-                  ),
-                ),
+                Semantics(
+                    textField: true,
+                    label: 'User id',
+                    child: TextField(
+                      controller: _user,
+                      decoration: const InputDecoration(
+                        labelText: 'User id',
+                        helperText: 'Recorded as the author of your changes.',
+                      ),
+                    )),
                 const SizedBox(height: 8),
-                TextField(
-                  controller: _displayName,
-                  decoration: const InputDecoration(labelText: 'Display name'),
-                ),
+                Semantics(
+                    textField: true,
+                    label: 'Display name',
+                    child: TextField(
+                      controller: _displayName,
+                      decoration:
+                          const InputDecoration(labelText: 'Display name'),
+                    )),
                 const SizedBox(height: 8),
-                TextField(
-                  controller: _registerToken,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Registration token',
-                    helperText: 'Needed once, for a new account.',
-                  ),
-                ),
+                Semantics(
+                    textField: true,
+                    label: 'Registration token',
+                    child: TextField(
+                      controller: _registerToken,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Registration token',
+                        helperText: 'Needed once, for a new account.',
+                      ),
+                    )),
                 const SizedBox(height: 12),
                 FilledButton.icon(
                   onPressed: _busy ? null : _register,
@@ -492,20 +505,26 @@ class _SettingsPageState extends State<SettingsPage> {
                 setState(() => _showAdvanced = expanded),
             childrenPadding: const EdgeInsets.symmetric(vertical: 8),
             children: [
-              TextField(
-                controller: _staticToken,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Static bearer token',
-                  helperText:
-                      'From the server\'s -tokens flag. Overwrites the passkey session.',
-                ),
-              ),
+              Semantics(
+                  textField: true,
+                  label: 'Static bearer token',
+                  child: TextField(
+                    controller: _staticToken,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Static bearer token',
+                      helperText:
+                          'From the server\'s -tokens flag. Overwrites the passkey session.',
+                    ),
+                  )),
               const SizedBox(height: 8),
-              TextField(
-                controller: _advancedUser,
-                decoration: const InputDecoration(labelText: 'User id'),
-              ),
+              Semantics(
+                  textField: true,
+                  label: 'User id',
+                  child: TextField(
+                    controller: _advancedUser,
+                    decoration: const InputDecoration(labelText: 'User id'),
+                  )),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: _busy ? null : _saveAdvanced,

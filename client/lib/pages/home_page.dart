@@ -91,7 +91,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pending = widget.db.pendingCount;
     return Scaffold(
       appBar: AppBar(
         title: const Text('giki'),
@@ -106,14 +105,22 @@ class _HomePageState extends State<HomePage> {
               _configureSync();
             },
           ),
-          IconButton(
-            tooltip: pending == 0 ? 'Sync now' : '$pending change(s) waiting',
-            icon: Badge(
-              isLabelVisible: pending > 0,
-              label: Text('$pending'),
-              child: const Icon(Icons.sync),
+          // Listening rather than reading once: editing happens in a child
+          // route, and this shell does not rebuild when that route pops. The
+          // badge used to stay empty while an edit sat in the outbox, which
+          // made the one indicator of unsynced work wrong exactly when it
+          // mattered.
+          ValueListenableBuilder<int>(
+            valueListenable: widget.db.pendingChanges,
+            builder: (context, pending, child) => IconButton(
+              tooltip: pending == 0 ? 'Sync now' : '$pending change(s) waiting',
+              icon: Badge(
+                isLabelVisible: pending > 0,
+                label: Text('$pending'),
+                child: const Icon(Icons.sync),
+              ),
+              onPressed: _syncNow,
             ),
-            onPressed: _syncNow,
           ),
         ],
         bottom: PreferredSize(

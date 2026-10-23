@@ -1,6 +1,6 @@
 # Text fields expose no accessible name
 
-- **Found**: 2026-10-23 · **Charter**: 03-passkeys.md (noticed while driving the UI) · **Status**: open
+- **Found**: 2026-10-23 · **Charter**: 03-passkeys.md (noticed while driving the UI) · **Status**: fixed (`Semantics(textField:)` around each field, asserted in `integration_test/sync_flow_test.dart`)
 
 ## What happens
 
@@ -30,10 +30,22 @@ Anyone using a screen reader meets a form of unnamed boxes. It is also why
 every exploratory session more brittle than it should be: the indices shift
 when the layout changes.
 
-## Worth checking before fixing
+## The fix
 
-Flutter usually derives the semantics label from `InputDecoration.labelText`,
-so this may be a quirk of how these fields are built rather than something
-inherent. Wrapping each field in `Semantics(label: ..., textField: true)` is
-the blunt fix; finding out why the decoration's label is not reaching the tree
-is the better one.
+Every labelled field is wrapped in `Semantics(textField: true, label: ...)`.
+Flutter renders `InputDecoration`'s label as a *sibling* node, so the editable
+element itself reached the browser unnamed; the wrapper puts the name on the
+control that takes focus, which is what gets announced.
+
+Verified in a browser:
+
+```js
+[...document.querySelectorAll('flt-semantics input, flt-semantics textarea')]
+  .map(i => i.getAttribute('aria-label'))
+// ["Title", "Title", "Body", "Body"]   (was [null, null])
+```
+
+The wrapper nodes themselves stay unlabelled, so nothing is announced twice.
+
+`tool/explore.mjs` now also addresses fields by name, which is what made the
+indices brittle; `#0`-style targeting stays for fields that still have none.

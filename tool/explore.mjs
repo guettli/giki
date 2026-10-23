@@ -147,6 +147,9 @@ const PAGE_HELPERS = `
         return {
           index,
           tag: input.tagName.toLowerCase(),
+          // Flutter puts a field's accessible name on the editable element
+          // rather than on its semantics node, so this is where to read it.
+          label: input.getAttribute('aria-label') || '',
           value: input.value,
           x: Math.round(box.x + box.width / 2),
           y: Math.round(box.y + box.height / 2),
@@ -222,6 +225,15 @@ const PAGE_HELPERS = `
       if (!field) return { ok: false, reason: 'no field ' + needle };
       return { ok: true, label: needle + ' (' + field.tag + ')', x: field.x, y: field.y };
     }
+    // A named text field: its label lives on the <input>, which the semantics
+    // search below cannot see.
+    const wanted = needle.toLowerCase();
+    const field = api.fields().find((f) => f.label.toLowerCase() === wanted)
+      ?? api.fields().find((f) => f.label.toLowerCase().includes(wanted));
+    if (field && field.label) {
+      return { ok: true, label: field.label, x: field.x, y: field.y };
+    }
+
     const node = element(needle);
     if (!node) return { ok: false, reason: 'nothing labelled ' + JSON.stringify(needle) };
     const box = node.getBoundingClientRect();
@@ -335,7 +347,8 @@ const commands = {
       console.log(`(${node.x},${node.y})${role} ${node.label}${value}`)
     }
     for (const field of fields) {
-      console.log(`(${field.x},${field.y}) [field #${field.index} ${field.tag}] = ${JSON.stringify(field.value)}`)
+      const name = field.label ? ` ${field.label}` : ''
+      console.log(`(${field.x},${field.y}) [field #${field.index} ${field.tag}]${name} = ${JSON.stringify(field.value)}`)
     }
   },
 

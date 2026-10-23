@@ -137,20 +137,32 @@ class _NodeEditorState extends State<NodeEditor> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          TextField(
-            controller: _title,
-            decoration: const InputDecoration(labelText: 'Title'),
+          // Semantics around every field: Flutter renders InputDecoration's
+          // label as a separate node, so the editable element itself reaches
+          // the browser's accessibility tree with no name at all -- a screen
+          // reader announces "edit text" and nothing more.
+          Semantics(
+            textField: true,
+            label: 'Title',
+            child: TextField(
+              controller: _title,
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
           ),
           const SizedBox(height: 16),
-          TextField(
-            controller: _body,
-            minLines: 8,
-            maxLines: null,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: 'Body',
-              helperText: 'Link with [[Another Page]]. A link to a page that '
-                  'does not exist yet is fine.',
+          Semantics(
+            textField: true,
+            label: 'Body',
+            child: TextField(
+              controller: _body,
+              minLines: 8,
+              maxLines: null,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Body',
+                helperText: 'Link with [[Another Page]]. A link to a page that '
+                    'does not exist yet is fine.',
+              ),
             ),
           ),
           const SizedBox(height: 24),
