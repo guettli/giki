@@ -39,6 +39,37 @@ void main() {
     expect(encodeTimestamp48(1792822369722), [1, 161, 108, 138, 93, 186]);
   });
 
+  group('name-based ids', () {
+    test('are the same on every device for the same parts', () {
+      // The whole point: two offline devices reviewing the same new card
+      // must create the same schedule row.
+      expect(srsStateId('card-1', 'alice'), srsStateId('card-1', 'alice'));
+    });
+
+    test('differ when any part differs', () {
+      final ids = {
+        srsStateId('card-1', 'alice'),
+        srsStateId('card-2', 'alice'),
+        srsStateId('card-1', 'bob'),
+        nameBasedId('another/namespace', ['card-1', 'alice']),
+      };
+      expect(ids, hasLength(4));
+    });
+
+    test('do not run their parts together', () {
+      // A plain concatenation would make these equal.
+      expect(nameBasedId('ns', ['a', 'bc']),
+          isNot(nameBasedId('ns', ['ab', 'c'])));
+    });
+
+    test('are well-formed version 8 UUIDs', () {
+      expect(
+          srsStateId('card-1', 'alice'),
+          matches(RegExp(
+              r'^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')));
+    });
+  });
+
   test('sorts by creation time, which keeps inserts sequential', () async {
     final first = newId();
     await Future<void>.delayed(const Duration(milliseconds: 5));

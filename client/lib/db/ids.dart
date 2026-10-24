@@ -7,8 +7,11 @@
 /// far too late to fix.
 library;
 
+import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 
 final Random _random = Random.secure();
 
@@ -26,6 +29,34 @@ String newId() {
   }
   bytes[6] = (bytes[6] & 0x0f) | 0x70; // version 7
   bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+  return _format(bytes);
+}
+
+/// A name-based id: the same namespace and parts always give the same UUID.
+///
+/// For rows that must be unique per combination of other values, like the one
+/// review schedule per card and user. Two offline devices that each create
+/// "the schedule for this card" then create the *same* row, and
+/// Last-Write-Wins merges their versions. With random ids they created two
+/// rows that nothing ever merged, and the card never left the study queue.
+///
+/// A version 8 (custom) UUID per RFC 9562, from SHA-256 of the namespace and
+/// the parts, separated by NUL so that ("a", "bc") and ("ab", "c") differ.
+String nameBasedId(String namespace, List<String> parts) {
+  final digest =
+      sha256.convert(utf8.encode([namespace, ...parts].join('\u0000'))).bytes;
+  final bytes = Uint8List.fromList(digest.sublist(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x80; // version 8
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+  return _format(bytes);
+}
+
+/// The id of [userId]'s review schedule for [cardId]. Every device computes
+/// the same one.
+String srsStateId(String cardId, String userId) =>
+    nameBasedId('giki/srs_state', [cardId, userId]);
+
+String _format(List<int> bytes) {
   final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
       '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
