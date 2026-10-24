@@ -455,8 +455,16 @@ void main() {
   /// Writes a newer version of a node into the local database the way the
   /// sync worker does -- through applyDeltas, under sync_mute -- as if another
   /// device had edited it and this one had just pulled the change.
+  ///
+  /// The payload is the full row, as the server's ChangeLog always holds it:
+  /// the server stamps created_at onto every row it accepts. An early version
+  /// of this helper sent a partial row, and the NOT NULL constraint on
+  /// created_at rejected it -- a test bug, but a reminder that a delta is a
+  /// whole row, never a patch.
   void receiveRemoteEdit(String id, String body) {
     final node = nodes.byId(id)!;
+    final createdAt = db.raw.select(
+        'SELECT created_at, created_by FROM nodes WHERE id = ?', [id]).first;
     final clock =
         formatClock(DateTime.now().toUtc().add(const Duration(seconds: 1)));
     db.applyDeltas([
@@ -470,6 +478,8 @@ void main() {
           'title': node.title,
           'title_key': node.titleKey,
           'body': body,
+          'created_at': createdAt['created_at'],
+          'created_by': createdAt['created_by'],
           'updated_at': clock,
           'updated_by': 'another-device-user',
           'is_deleted': 0,
