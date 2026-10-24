@@ -119,61 +119,18 @@ class _StudyPageState extends State<StudyPage> {
     setState(() => _revealedCardId = null);
   }
 
-  /// Creates a card, or edits [card]. Both sides are required: a card with
-  /// an empty side cannot be studied, and used to sit in the queue for good.
+  /// Creates a card, or edits [card].
   Future<void> _editCard(DueCard? card) async {
-    final front = TextEditingController(text: card?.front ?? '');
-    final back = TextEditingController(text: card?.back ?? '');
-    final saved = await showDialog<bool>(
+    final sides = await showDialog<(String, String)>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(card == null ? 'New card' : 'Edit card'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Semantics(
-                textField: true,
-                label: 'Front',
-                child: TextField(
-                  controller: front,
-                  autofocus: true,
-                  decoration: const InputDecoration(labelText: 'Front'),
-                )),
-            Semantics(
-                textField: true,
-                label: 'Back',
-                child: TextField(
-                  controller: back,
-                  decoration: const InputDecoration(labelText: 'Back'),
-                )),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          ListenableBuilder(
-            listenable: Listenable.merge([front, back]),
-            builder: (context, _) => FilledButton(
-              onPressed: front.text.trim().isEmpty || back.text.trim().isEmpty
-                  ? null
-                  : () => Navigator.of(context).pop(true),
-              child: Text(card == null ? 'Create' : 'Save'),
-            ),
-          ),
-        ],
-      ),
+      builder: (context) => _CardDialog(card: card),
     );
-    if (saved ?? false) {
-      widget.cards.save(
-          id: card?.cardId, front: front.text.trim(), back: back.text.trim());
+    if (sides != null) {
+      widget.cards.save(id: card?.cardId, front: sides.$1, back: sides.$2);
       if (mounted) {
         setState(() {});
       }
     }
-    front.dispose();
-    back.dispose();
   }
 
   Future<void> _deleteCard(DueCard card) async {
@@ -200,5 +157,78 @@ class _StudyPageState extends State<StudyPage> {
         setState(() {});
       }
     }
+  }
+}
+
+/// The front and back of a card, both required: a card with an empty side
+/// cannot be studied, and used to sit in the queue for good.
+///
+/// A widget of its own so that it owns the text controllers. Disposed by the
+/// caller right after showDialog returned, they were still in use by the
+/// dialog's closing animation.
+class _CardDialog extends StatefulWidget {
+  const _CardDialog({required this.card});
+
+  final DueCard? card;
+
+  @override
+  State<_CardDialog> createState() => _CardDialogState();
+}
+
+class _CardDialogState extends State<_CardDialog> {
+  late final TextEditingController _front =
+      TextEditingController(text: widget.card?.front ?? '');
+  late final TextEditingController _back =
+      TextEditingController(text: widget.card?.back ?? '');
+
+  @override
+  void dispose() {
+    _front.dispose();
+    _back.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final complete =
+        _front.text.trim().isNotEmpty && _back.text.trim().isNotEmpty;
+    return AlertDialog(
+      title: Text(widget.card == null ? 'New card' : 'Edit card'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+              textField: true,
+              label: 'Front',
+              child: TextField(
+                controller: _front,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(labelText: 'Front'),
+              )),
+          Semantics(
+              textField: true,
+              label: 'Back',
+              child: TextField(
+                controller: _back,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(labelText: 'Back'),
+              )),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: complete
+              ? () => Navigator.of(context)
+                  .pop((_front.text.trim(), _back.text.trim()))
+              : null,
+          child: Text(widget.card == null ? 'Create' : 'Save'),
+        ),
+      ],
+    );
   }
 }
