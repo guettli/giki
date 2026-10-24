@@ -12,6 +12,7 @@ import '../wiki/wikilink.dart';
 import 'clock.dart';
 import 'database.dart';
 import 'ids.dart';
+import 'link_index.dart';
 
 /// A node as shown in lists.
 class NodeSummary {
@@ -103,7 +104,7 @@ class NodeRepository {
       '  updated_by = excluded.updated_by',
       [nodeId, title, titleKey, body, now, _db.userId, now, _db.userId],
     );
-    _reindexLinks(nodeId, body);
+    reindexLinks(_db.raw, nodeId);
     return nodeId;
   }
 
@@ -114,7 +115,7 @@ class NodeRepository {
       'UPDATE nodes SET is_deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?',
       [nowClock(), _db.userId, id],
     );
-    _db.raw.execute('DELETE FROM links WHERE source_node_id = ?', [id]);
+    reindexLinks(_db.raw, id);
   }
 
   /// The nodes that link to [titleKey] -- the passive context that makes a
@@ -135,20 +136,6 @@ class NodeRepository {
           updatedAt: row['updated_at'] as String,
         ),
     ];
-  }
-
-  /// Rebuilds the derived link index for one node. links is local to each
-  /// database and carries no sync columns, so this never reaches the outbox.
-  void _reindexLinks(String nodeId, String body) {
-    _db.raw.execute('DELETE FROM links WHERE source_node_id = ?', [nodeId]);
-    for (final key in parseLinks(body)) {
-      _db.raw.execute(
-        'INSERT INTO links (source_node_id, target_title_key, target_node_id) '
-        "VALUES (?, ?, COALESCE((SELECT id FROM nodes WHERE title_key = ? AND is_deleted = 0 LIMIT 1), '')) "
-        'ON CONFLICT (source_node_id, target_title_key) DO NOTHING',
-        [nodeId, key, key],
-      );
-    }
   }
 
   Node _node(Map<String, Object?> row) => Node(

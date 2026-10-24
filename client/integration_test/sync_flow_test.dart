@@ -30,6 +30,7 @@ import 'package:giki/auth/webauthn.dart';
 import 'package:giki/auth/webauthn_json.dart';
 import 'package:giki/db/clock.dart';
 import 'package:giki/db/database.dart';
+import 'package:giki/db/link_index.dart';
 import 'package:giki/db/repository.dart';
 import 'package:giki/main.dart';
 import 'package:giki/pages/wiki_page.dart';
@@ -579,6 +580,77 @@ void main() {
         reason: 'choosing their version still wrote mine');
     expect(nodes.byId(id)!.body, 'their newer edit');
     expect(find.text('their newer edit'), findsOneWidget);
+  });
+
+  // Backlinks used to know only about pages saved on this device: deltas
+  // upserted the row and skipped the derived link index.
+  testWidgets('a page that arrives by sync shows up in backlinks', (_) async {
+    void deliver(String id, String title, String body,
+        {required DateTime clock, int deleted = 0}) {
+      final stamp = formatClock(clock);
+      db.applyDeltas([
+        Delta(
+          seq: 0,
+          table: 'nodes',
+          recordId: id,
+          op: deleted == 1 ? 'DELETE' : 'UPDATE',
+          payload: {
+            'id': id,
+            'title': title,
+            'title_key': title.toLowerCase(),
+            'body': body,
+            'created_at': stamp,
+            'created_by': 'another-device-user',
+            'updated_at': stamp,
+            'updated_by': 'another-device-user',
+            'is_deleted': deleted,
+          },
+        ),
+      ], db.cursor);
+    }
+
+    final now = DateTime.now().toUtc();
+    deliver('synced-linker', 'Synced Linker', 'see [[Synced Target]]',
+        clock: now);
+    expect(nodes.backlinks('synced target').map((n) => n.title),
+        contains('Synced Linker'),
+        reason: 'a page that arrived by sync is missing from backlinks');
+
+    // An older version the Last-Write-Wins guard rejects must not move the
+    // index either: it is rebuilt from the stored row, not the payload.
+    deliver('synced-linker', 'Synced Linker', 'now about [[Elsewhere]]',
+        clock: now.subtract(const Duration(hours: 1)));
+    expect(nodes.backlinks('synced target').map((n) => n.title),
+        contains('Synced Linker'),
+        reason: 'a rejected older delta rewrote the link index');
+    expect(nodes.backlinks('elsewhere'), isEmpty);
+
+    // A deletion that arrives by sync takes its links with it.
+    deliver('synced-linker', 'Synced Linker', 'see [[Synced Target]]',
+        clock: now.add(const Duration(seconds: 1)), deleted: 1);
+    expect(nodes.backlinks('synced target'), isEmpty,
+        reason: 'a deleted page still shows up in backlinks');
+  });
+
+  // A fix to how links are derived must also reach pages written before it.
+  testWidgets('an upgraded device rebuilds its link index once', (_) async {
+    final id = nodes.save(title: 'Old Linker', body: 'see [[Upgrade Target]]');
+
+    // Recreate the state a device was left in before deltas maintained the
+    // index: the page is there, its links are not, and the device has never
+    // run the rebuild.
+    db.raw.execute('DELETE FROM links WHERE source_node_id = ?', [id]);
+    db.raw
+        .execute('DELETE FROM sync_meta WHERE key = ?', [linkIndexVersionKey]);
+    expect(nodes.backlinks('upgrade target'), isEmpty);
+
+    expect(ensureLinkIndex(db.raw), greaterThan(0),
+        reason: 'the rebuild did not run on an un-upgraded device');
+    expect(nodes.backlinks('upgrade target').map((n) => n.title),
+        contains('Old Linker'));
+
+    // And only once.
+    expect(ensureLinkIndex(db.raw), 0, reason: 'the rebuild ran again');
   });
 
   testWidgets('text fields have an accessible name', (tester) async {
