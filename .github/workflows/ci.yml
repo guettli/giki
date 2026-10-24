@@ -103,6 +103,12 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed .
       - run: flutter analyze
       - run: flutter test
+      # Again, in the browser. giki only ever runs on the web, and the web's
+      # numbers are not the VM's: ints are doubles, and bitwise operators work
+      # on 32 bits. The UUIDv7 encoder passed on the VM for weeks while every id
+      # minted in a browser carried a date in January 1970.
+      - name: flutter test (in Chrome, the platform giki ships to)
+        run: flutter test --platform chrome
       - name: Build the PWA
         run: |
           ../tool/fetch-sqlite-wasm.sh
