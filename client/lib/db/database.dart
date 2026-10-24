@@ -14,6 +14,7 @@ import 'package:sqlite3/wasm.dart';
 
 import 'clock.dart';
 import 'ids.dart';
+import 'link_index.dart';
 import 'models.dart';
 
 export 'models.dart';
@@ -93,6 +94,9 @@ class GikiDatabase {
 
     final giki = GikiDatabase._(db, fileSystem);
     giki._ensureDeviceId();
+    // Repairs the link index of a device upgraded from a version whose deltas
+    // did not maintain it. A no-op on every later start.
+    ensureLinkIndex(db);
     giki.refreshPendingCount();
     await giki.flush();
     return giki;
@@ -271,6 +275,12 @@ class GikiDatabase {
       'WHERE excluded.updated_at > "${delta.table}".updated_at',
       [for (final column in columns) delta.payload[column]],
     );
+
+    // The link index is derived, so it is not in the delta; rebuild it here or
+    // a page that arrives by sync never appears in anyone's backlinks.
+    if (delta.table == 'nodes') {
+      reindexLinks(raw, delta.recordId);
+    }
   }
 
   /// Convenience for repositories: the current timestamp.
