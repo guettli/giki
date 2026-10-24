@@ -150,6 +150,10 @@ const PAGE_HELPERS = `
           // Flutter puts a field's accessible name on the editable element
           // rather than on its semantics node, so this is where to read it.
           label: input.getAttribute('aria-label') || '',
+          // Flutter only fills the editable element while it has focus; the
+          // text of every other field lives on the canvas and nowhere in the
+          // DOM. Reporting "" for those would claim the field is empty.
+          focused: document.activeElement === input,
           value: input.value,
           x: Math.round(box.x + box.width / 2),
           y: Math.round(box.y + box.height / 2),
@@ -348,7 +352,10 @@ const commands = {
     }
     for (const field of fields) {
       const name = field.label ? ` ${field.label}` : ''
-      console.log(`(${field.x},${field.y}) [field #${field.index} ${field.tag}]${name} = ${JSON.stringify(field.value)}`)
+      const value = field.focused || field.value
+        ? JSON.stringify(field.value)
+        : '(not exposed until focused -- use `shot`)'
+      console.log(`(${field.x},${field.y}) [field #${field.index} ${field.tag}]${name} = ${value}`)
     }
   },
 

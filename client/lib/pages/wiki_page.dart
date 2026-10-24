@@ -89,24 +89,135 @@ class _NodeEditorState extends State<NodeEditor> {
   late final TextEditingController _body =
       TextEditingController(text: _node?.body ?? '');
 
+  /// The version this editor's text is based on: what was loaded, or last
+  /// saved. Comparing it with the stored row is how the editor notices that
+  /// another device changed the page while it was open.
+  String? get _baseVersion => _node?.updatedAt;
+
+  /// The text as loaded or last saved, to tell "the user edited something"
+  /// apart from "the user pressed Save".
+  late String _savedTitle = _title.text;
+  late String _savedBody = _body.text;
+
+  /// True when the stored page moved on while this editor had unsaved edits.
+  bool _changedElsewhere = false;
+
+  bool get _dirty =>
+      _title.text.trim() != _savedTitle.trim() || _body.text != _savedBody;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.db.nodesRevision.addListener(_onNodesChanged);
+  }
+
   @override
   void dispose() {
+    widget.db.nodesRevision.removeListener(_onNodesChanged);
     _title.dispose();
     _body.dispose();
     super.dispose();
   }
 
-  void _save() {
+  /// A row in `nodes` changed -- maybe this page, maybe from another device.
+  void _onNodesChanged() {
+    final node = _node;
+    if (node == null || !mounted) {
+      return;
+    }
+    final stored = widget.nodes.byId(node.id);
+    if (stored == null || stored.updatedAt == _baseVersion) {
+      return;
+    }
+    if (_dirty) {
+      // Keep what the user typed, but make sure Save cannot quietly overwrite
+      // the newer version.
+      setState(() => _changedElsewhere = true);
+      return;
+    }
+    // Nothing unsaved: show the newer version rather than a stale one.
+    setState(() => _adopt(stored));
+  }
+
+  void _adopt(Node node) {
+    _node = node;
+    _title.text = node.title;
+    _body.text = node.body;
+    _savedTitle = node.title;
+    _savedBody = node.body;
+    _changedElsewhere = false;
+  }
+
+  Future<void> _save() async {
+    final existing = _node;
+
+    // Nothing changed: write nothing. A save always stamps a fresh updated_at,
+    // and under Last-Write-Wins a fresh timestamp on unchanged text beats any
+    // newer edit another device made -- which is how pressing Save on a page
+    // you never touched used to erase someone else's writing.
+    if (existing != null && !_dirty) {
+      _snack('No changes to save.');
+      return;
+    }
+
+    // Re-read rather than trusting _changedElsewhere: the update hook is
+    // asynchronous, and a delta may have landed a moment ago.
+    if (existing != null) {
+      final stored = widget.nodes.byId(existing.id);
+      if (stored != null && stored.updatedAt != _baseVersion) {
+        final overwrite = await _confirmOverwrite();
+        if (!mounted) {
+          return;
+        }
+        if (!overwrite) {
+          setState(() => _adopt(stored));
+          _snack('Showing the version from the other device.');
+          return;
+        }
+      }
+    }
+
     final id = widget.nodes.save(
-      id: _node?.id,
+      id: existing?.id,
       title: _title.text.trim(),
       body: _body.text,
     );
-    setState(() => _node = widget.nodes.byId(id));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-          content: Text('Saved locally. It will sync in the background.')),
+    setState(() {
+      _node = widget.nodes.byId(id);
+      _savedTitle = _title.text;
+      _savedBody = _body.text;
+      _changedElsewhere = false;
+    });
+    _snack('Saved locally. It will sync in the background.');
+  }
+
+  Future<bool> _confirmOverwrite() async {
+    final choice = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Changed on another device'),
+        content: const Text(
+          'This page was changed somewhere else after you opened it. '
+          'Saving now replaces that version with yours.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Show their version'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Overwrite with mine'),
+          ),
+        ],
+      ),
     );
+    return choice ?? false;
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -137,6 +248,24 @@ class _NodeEditorState extends State<NodeEditor> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (_changedElsewhere)
+            MaterialBanner(
+              content: const Text(
+                'This page was changed on another device while you were '
+                'editing. Saving will ask before replacing that version.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    final stored = widget.nodes.byId(_node!.id);
+                    if (stored != null) {
+                      setState(() => _adopt(stored));
+                    }
+                  },
+                  child: const Text('Discard mine, show theirs'),
+                ),
+              ],
+            ),
           // Semantics around every field: Flutter renders InputDecoration's
           // label as a separate node, so the editable element itself reaches
           // the browser's accessibility tree with no name at all -- a screen
