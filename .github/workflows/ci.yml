@@ -86,6 +86,12 @@ jobs:
       # stderr, so they are in this job's log -- no artifact to download.
       - name: Run the end-to-end test
         run: tool/e2e.sh
+      # explore.mjs speaks CDP over Node's built-in WebSocket (Node 22+).
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: The PWA starts without a network
+        run: tool/offline-check.sh
 
   client:
     name: Flutter client
@@ -109,7 +115,11 @@ jobs:
       # minted in a browser carried a date in January 1970.
       - name: flutter test (in Chrome, the platform giki ships to)
         run: flutter test --platform chrome
+      # --no-web-resources-cdn: the engine and its fonts come from giki's own
+      # server, not Google's CDN, so the service worker can keep them for an
+      # offline start (tool/offline-check.sh). Same flag in release.yml and
+      # tool/explore.sh.
       - name: Build the PWA
         run: |
           ../tool/fetch-sqlite-wasm.sh
-          flutter build web --release
+          flutter build web --release --no-web-resources-cdn

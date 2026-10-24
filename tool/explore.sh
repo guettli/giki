@@ -127,12 +127,12 @@ start_session() {
     # where `flutter build web --target=integration_test/...` leaves the test
     # bundle, and serving that looks exactly like a broken app -- a page that
     # renders, reports nonsense and answers no input.
-    stamp="lib/main.dart $(find "$root/client/lib" "$root/client/pubspec.yaml" -type f -newer /dev/null -printf '%T@ %p\n' 2>/dev/null | sort | cksum)"
+    stamp="lib/main.dart $(find "$root/client/lib" "$root/client/web" "$root/client/pubspec.yaml" -type f -newer /dev/null -printf '%T@ %p\n' 2>/dev/null | sort | cksum)"
     if [ ! -f "$root/client/build/web/index.html" ] ||
         [ "$(cat "$state/bundle.stamp" 2>/dev/null || true)" != "$stamp" ] ||
         [ "${GIKI_EXPLORE_REBUILD:-}" = "1" ]; then
         echo "building the web bundle (a minute; skipped while the sources are unchanged)"
-        (cd "$root/client" && flutter build web --release --target=lib/main.dart \
+        (cd "$root/client" && flutter build web --release --no-web-resources-cdn --target=lib/main.dart \
             >"$state/build.log" 2>&1) ||
             { echo "flutter build web failed; see $state/build.log" >&2; return 1; }
         printf '%s' "$stamp" >"$state/bundle.stamp"

@@ -33,10 +33,7 @@ func WebUI(dir string) http.Handler {
 			return
 		}
 
-		// Everything except the shell and the service worker may be cached:
-		// Flutter's build output is content-addressed enough that a stale
-		// asset would be a stale asset of the version that asked for it.
-		setCacheHeaders(w, clean)
+		setCacheHeaders(w)
 		fileServer.ServeHTTP(w, r)
 	})
 }
@@ -61,20 +58,17 @@ func serveShell(w http.ResponseWriter, r *http.Request, dir string) {
 		http.Error(w, "cannot read index.html", http.StatusInternalServerError)
 		return
 	}
-	setCacheHeaders(w, "index.html")
+	setCacheHeaders(w)
 	http.ServeContent(w, r, "index.html", info.ModTime(), file)
 }
 
-// setCacheHeaders keeps the shell and the service worker uncacheable.
+// setCacheHeaders makes the browser revalidate every file of the app.
 //
-// If index.html or flutter_service_worker.js is cached, a user who already has
-// the app installed keeps running the previous build after a deploy -- and with
-// a local-first app that means the old schema against the new server.
-func setCacheHeaders(w http.ResponseWriter, name string) {
-	switch filepath.Base(name) {
-	case "index.html", "flutter_service_worker.js", "version.json", "manifest.json":
-		w.Header().Set("Cache-Control", "no-cache")
-	default:
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-	}
+// Flutter's file names carry no content hash: main.dart.js is main.dart.js in
+// every release. A max-age on it kept running the previous build under a fresh
+// index.html for up to an hour after a deploy -- for a local-first app, the
+// old schema against the new server. Revalidating costs a 304, and offline
+// the service worker (web/sw.js) answers instead.
+func setCacheHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache")
 }

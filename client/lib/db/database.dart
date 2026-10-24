@@ -11,6 +11,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sqlite3/wasm.dart';
+import 'package:web/web.dart' as web;
 
 import 'clock.dart';
 import 'ids.dart';
@@ -100,7 +101,12 @@ class GikiDatabase {
     String wasmUrl = 'sqlite3.wasm',
     String storageName = 'giki',
   }) async {
-    final sqlite = await WasmSqlite3.loadFromUrl(Uri.parse(wasmUrl));
+    // Relative to <base href>, like every other file of the app. Dart resolves
+    // a relative URL against the page's address instead, so a reload on
+    // /some/path fetched /some/sqlite3.wasm -- the HTML shell -- and the app
+    // never started.
+    final sqlite = await WasmSqlite3.loadFromUrl(
+        Uri.parse(web.document.baseURI).resolve(wasmUrl));
     final (fileSystem, path) = await _openFileSystem(storageName);
     sqlite.registerVirtualFileSystem(fileSystem, makeDefault: true);
 

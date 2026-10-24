@@ -14,5 +14,23 @@
   <!-- sqlite3.wasm sits next to this file and is fetched at startup; see
        tool/fetch-sqlite-wasm.sh. -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Offline start: sw.js keeps a copy of everything the app loads. Files
+    // fetched before the worker took control are listed for it twice, once
+    // it is ready and once the app has had time to fetch its wasm and fonts.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then((registration) => {
+        const handOver = () => registration.active.postMessage({
+          type: 'cache',
+          urls: [
+            new URL('./', document.baseURI).href,
+            ...performance.getEntriesByType('resource').map((entry) => entry.name),
+          ],
+        });
+        handOver();
+        setTimeout(handOver, 15000);
+      }).catch((error) => console.warn('giki: no offline start:', error));
+    }
+  </script>
 </body>
 </html>
