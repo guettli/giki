@@ -118,6 +118,7 @@ class SyncApiClient {
 
   /// Uploads attachment bytes under their SHA-256. Idempotent.
   Future<void> putBlob(String sha256, Uint8List bytes) async {
+    _checkBlobKey(sha256);
     final response = await _http.put(
       baseUrl.resolve('api/v1/blobs/$sha256'),
       headers: {
@@ -133,6 +134,7 @@ class SyncApiClient {
 
   /// Downloads attachment bytes. The caller verifies the hash.
   Future<Uint8List> getBlob(String sha256) async {
+    _checkBlobKey(sha256);
     final response = await _http.get(
       baseUrl.resolve('api/v1/blobs/$sha256'),
       headers: {'Authorization': 'Bearer $token'},
@@ -141,6 +143,14 @@ class SyncApiClient {
       throw SyncApiException(response.statusCode, response.body);
     }
     return response.bodyBytes;
+  }
+
+  /// The key comes from a synced row, so from another device: anything but
+  /// a plain hash could steer the request at another path on this server.
+  static void _checkBlobKey(String key) {
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(key)) {
+      throw ArgumentError.value(key, 'sha256', 'not a lowercase hex sha256');
+    }
   }
 
   /// Releases the underlying HTTP client.

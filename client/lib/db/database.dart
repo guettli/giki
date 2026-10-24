@@ -64,6 +64,23 @@ class GikiDatabase {
   /// follows uploads, deletions and bytes fetched in the background.
   final ValueNotifier<int> attachmentsRevision = ValueNotifier<int>(0);
 
+  /// Blob hashes that an open page shows but this device does not have. The
+  /// sync worker fetches them as soon as they are asked for; nothing else is
+  /// downloaded, so a tab holds only the files someone actually looked at.
+  final Set<String> wantedBlobs = {};
+
+  /// Bumped when [wantedBlobs] grows, to wake the sync worker.
+  final ValueNotifier<int> blobsWanted = ValueNotifier<int>(0);
+
+  /// Asks for the bytes of [keys] to be fetched.
+  void wantBlobs(Iterable<String> keys) {
+    final before = wantedBlobs.length;
+    wantedBlobs.addAll(keys);
+    if (wantedBlobs.length != before) {
+      blobsWanted.value++;
+    }
+  }
+
   /// Where the database lives inside the virtual file system. SimpleOpfsFileSystem
   /// can only persist a file called `/database`, so that name is not ours to
   /// choose when OPFS is in use.
@@ -147,6 +164,7 @@ class GikiDatabase {
     pendingChanges.dispose();
     nodesRevision.dispose();
     attachmentsRevision.dispose();
+    blobsWanted.dispose();
     raw.close();
   }
 

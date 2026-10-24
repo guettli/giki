@@ -181,14 +181,12 @@ class AttachmentRepository {
   void markUploaded(String key) =>
       _db.raw.execute('UPDATE blobs SET uploaded = 1 WHERE sha256 = ?', [key]);
 
-  /// Hashes that live attachments refer to and this device lacks.
-  List<String> missingBlobs() => [
-        for (final row in _db.raw.select(
-            'SELECT DISTINCT a.sha256 FROM attachments a '
-            'LEFT JOIN blobs b ON b.sha256 = a.sha256 '
-            "WHERE a.is_deleted = 0 AND a.sha256 != '' AND b.sha256 IS NULL "
-            'ORDER BY 1'))
-          row['sha256'] as String,
+  /// Those of [keys] this device has no bytes for.
+  List<String> missing(Iterable<String> keys) => [
+        for (final key in keys)
+          if (_db.raw
+              .select('SELECT 1 FROM blobs WHERE sha256 = ?', [key]).isEmpty)
+            key,
       ];
 
   /// Stores bytes fetched from the server, after checking they are what the

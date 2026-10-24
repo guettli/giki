@@ -157,6 +157,26 @@ func (s *Store) applyOne(ctx context.Context, tx *sql.Tx, actor Actor, m Mutatio
 		}
 	}
 
+	// An attachment row is accepted only once its bytes are here. Clients
+	// upload blobs before pushing rows, so this never fires for a working
+	// client -- it makes "no device ever sees a row without bytes" a property
+	// of the server rather than a promise of every client. Tombstones pass:
+	// deleting needs no bytes.
+	if deleted, _ := row["is_deleted"].(int64); table.Name == "attachments" && m.Op != "DELETE" && deleted != 1 {
+		key, _ := row["sha256"].(string)
+		if !ValidBlobKey(key) {
+			return reject("attachment sha256 %q is not a lowercase hex sha256", key)
+		}
+		var present int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM blobs WHERE sha256 = ?`, key).Scan(&present); err != nil {
+			return res, fmt.Errorf("look up blob %s: %w", key, err)
+		}
+		if present == 0 {
+			return reject("blob %s has not been uploaded", key)
+		}
+	}
+
 	// --- Last-Write-Wins -----------------------------------------------
 	// Equal timestamps keep the row that is already stored. That is
 	// deterministic for a given server, which is what matters; it does mean a

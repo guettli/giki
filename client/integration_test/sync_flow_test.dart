@@ -858,19 +858,69 @@ void main() {
       },
     ]);
 
-    final report = await sync.syncUntilCaughtUp();
+    await sync.syncUntilCaughtUp();
     final listed = attachments.forNode(pageId);
     expect(listed.map((a) => a.filename), ['notes.txt'],
         reason: 'the attachment row did not arrive');
-    expect(listed.single.hasBytes, isTrue,
-        reason: 'the row arrived but its bytes were not fetched ($report)');
-    expect(attachments.bytes(key), bytes);
 
-    // Removing it is an ordinary tombstone, and the blob stays.
+    // Bytes are fetched on demand -- when a page showing them asks -- not
+    // for every file in the shared knowledge base.
+    expect(listed.single.hasBytes, isFalse,
+        reason: 'the bytes were downloaded before anyone asked for them');
+    db.wantBlobs([key]);
+    await sync.fetchWantedBlobs();
+    expect(attachments.forNode(pageId).single.hasBytes, isTrue,
+        reason: 'asking for the bytes did not fetch them');
+    expect(attachments.bytes(key), bytes);
+    expect(db.wantedBlobs, isEmpty);
+
+    // Removing it is an ordinary tombstone that reaches the server; the blob
+    // stays, since another row may share it.
     attachments.delete(attachmentId);
     expect(attachments.forNode(pageId), isEmpty);
     expect(attachments.bytes(key), isNotNull);
-    await sync.syncOnce();
+    final report = await sync.syncOnce();
+    expect(report.rejected, isEmpty);
+    final everything = await syncAsOtherDevice();
+    final tombstones = [
+      for (final change in everything['changes']! as List<Object?>)
+        if (change is Map<String, Object?> &&
+            change['record_id'] == attachmentId)
+          (change['payload']! as Map<String, Object?>)['is_deleted'],
+    ];
+    expect(tombstones.last, 1, reason: 'the removal never reached the server');
+  });
+
+  // Clients upload bytes before rows; the server enforces it regardless, so
+  // no device can be handed a row it cannot download.
+  testWidgets('the server refuses an attachment row without its bytes',
+      (_) async {
+    final clock = formatClock(DateTime.now().toUtc());
+    final missing = blobKey(utf8.encode('never uploaded'));
+    final response = await syncAsOtherDevice(mutations: [
+      {
+        'client_seq': 1,
+        'table': 'attachments',
+        'record_id': 'e2e-attachment-without-bytes',
+        'op': 'INSERT',
+        'updated_at': clock,
+        'payload': {
+          'id': 'e2e-attachment-without-bytes',
+          'node_id': 'nowhere',
+          'sha256': missing,
+          'filename': 'ghost.png',
+          'mime_type': 'image/png',
+          'size': 1,
+          'created_at': clock,
+          'created_by': claimedUser,
+          'updated_at': clock,
+          'updated_by': claimedUser,
+          'is_deleted': 0,
+        },
+      },
+    ]);
+    final results = response['results']! as List<Object?>;
+    expect((results.single! as Map<String, Object?>)['status'], 'rejected');
   });
 
   testWidgets('fetched bytes that do not match their hash are dropped',

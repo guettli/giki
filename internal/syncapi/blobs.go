@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/guettli/giki/internal/store"
 )
@@ -12,6 +13,9 @@ import (
 // a file ever reaches the outbox, so an oversized upload here means a client
 // bug or a client that is not giki.
 const MaxBlobBytes = 10 << 20 // 10 MiB
+
+// blobReadTimeout bounds one upload: 10 MiB in ten minutes is about 140 kbit/s.
+const blobReadTimeout = 10 * time.Minute
 
 // handlePutBlob stores attachment bytes under their SHA-256:
 //
@@ -29,6 +33,10 @@ func (s *Server) handlePutBlob(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusBadRequest, "the path must end in a lowercase hex sha256", nil)
 		return
 	}
+	// The server-wide ReadTimeout suits JSON requests; 10 MiB over a slow
+	// mobile link can take minutes, and a timed-out upload is retried in full
+	// every round. Error ignored: the default deadline is the fallback.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(blobReadTimeout))
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBlobBytes))
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {

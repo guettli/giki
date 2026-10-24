@@ -12,55 +12,82 @@ import 'package:web/web.dart' as web;
 
 /// A file the user chose.
 class PickedFile {
-  const PickedFile(
-      {required this.name, required this.mimeType, required this.bytes});
+  const PickedFile({
+    required this.name,
+    required this.mimeType,
+    required this.size,
+    required this.bytes,
+  });
 
   final String name;
 
   /// What the browser says the type is; empty when it does not know.
   final String mimeType;
-  final Uint8List bytes;
+  final int size;
+
+  /// Null when the file is larger than the caller's limit: it was never read,
+  /// so picking a 2 GB video costs nothing.
+  final Uint8List? bytes;
 }
 
-/// Opens the browser's file chooser and reads what the user picked.
+/// Opens the browser's file chooser and reads what the user picked; files
+/// over [maxBytes] come back unread.
 ///
 /// Completes with an empty list when the chooser is dismissed: browsers fire
 /// `cancel` for that since 2023, and without it the future would never
-/// complete.
-Future<List<PickedFile>> pickFiles({String accept = ''}) async {
+/// complete. The input is attached to the document while the chooser is open,
+/// since a detached element can be collected before it reports anything.
+Future<List<PickedFile>> pickFiles({required int maxBytes}) async {
   final input = web.HTMLInputElement()
     ..type = 'file'
     ..multiple = true
-    ..accept = accept;
+    ..style.display = 'none';
   final chosen = Completer<web.FileList?>();
-  input.onchange = ((web.Event _) => chosen.complete(input.files)).toJS;
-  input.oncancel = ((web.Event _) => chosen.complete(null)).toJS;
-  input.click();
-
-  final files = await chosen.future;
-  if (files == null) {
-    return const [];
+  void finish(web.FileList? files) {
+    if (!chosen.isCompleted) {
+      chosen.complete(files);
+    }
   }
-  return [
-    for (var i = 0; i < files.length; i++) await _read(files.item(i)!),
-  ];
+
+  input.onchange = ((web.Event _) => finish(input.files)).toJS;
+  input.oncancel = ((web.Event _) => finish(null)).toJS;
+  web.document.body!.append(input);
+  try {
+    input.click();
+    final files = await chosen.future;
+    if (files == null) {
+      return const [];
+    }
+    return [
+      for (var i = 0; i < files.length; i++)
+        await _read(files.item(i)!, maxBytes),
+    ];
+  } finally {
+    input.remove();
+  }
 }
 
-Future<PickedFile> _read(web.File file) async {
-  final buffer = await file.arrayBuffer().toDart;
+Future<PickedFile> _read(web.File file, int maxBytes) async {
+  final tooLarge = file.size > maxBytes;
   return PickedFile(
     name: file.name,
     mimeType: file.type,
-    bytes: buffer.toDart.asUint8List(),
+    size: file.size,
+    bytes: tooLarge
+        ? null
+        : (await file.arrayBuffer().toDart).toDart.asUint8List(),
   );
 }
 
 /// Hands [bytes] to the browser as a download called [filename].
-void saveFile(Uint8List bytes, String filename, String mimeType) {
+///
+/// Always as application/octet-stream: the type in the attachment row came
+/// from another device, and an opaque download is the one thing no type can
+/// turn into a page.
+void saveFile(Uint8List bytes, String filename) {
   final blob = web.Blob(
     [bytes.toJS].toJS,
-    web.BlobPropertyBag(
-        type: mimeType.isEmpty ? 'application/octet-stream' : mimeType),
+    web.BlobPropertyBag(type: 'application/octet-stream'),
   );
   final url = web.URL.createObjectURL(blob);
   web.HTMLAnchorElement()

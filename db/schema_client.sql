@@ -234,11 +234,18 @@ END;
 -- is 0 until the server confirmed it holds the bytes; the sync worker uploads
 -- those BEFORE pushing the outbox, so no other device ever learns of an
 -- attachment whose bytes the server does not have.
+--
+-- Deliberately a rowid table: SQLite's update hook, which is how the UI hears
+-- that bytes arrived, does not fire for WITHOUT ROWID tables.
+--
+-- Bytes of other devices' attachments are fetched on demand, when a page that
+-- shows them is opened -- not eagerly: the knowledge base is shared, and every
+-- tab holding every file would not scale.
 CREATE TABLE IF NOT EXISTS blobs (
     sha256     TEXT    PRIMARY KEY,
     size       INTEGER NOT NULL,
     data       BLOB    NOT NULL,
     uploaded   INTEGER NOT NULL DEFAULT 0,
     created_at TEXT    NOT NULL
-) WITHOUT ROWID;
+);
 CREATE INDEX IF NOT EXISTS blobs_pending ON blobs (sha256) WHERE uploaded = 0;

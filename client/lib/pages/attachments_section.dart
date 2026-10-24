@@ -2,6 +2,8 @@
 /// files listed for download.
 library;
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../db/attachments.dart';
@@ -25,12 +27,31 @@ class AttachmentsSection extends StatefulWidget {
 class _AttachmentsSectionState extends State<AttachmentsSection> {
   late final AttachmentRepository _attachments =
       AttachmentRepository(widget.db);
+
+  /// The page's attachments, re-read only when an attachment or blob changes,
+  /// not on every rebuild.
+  List<Attachment> _list = const [];
+
+  /// Image bytes by hash. Kept across rebuilds on purpose: Image.memory
+  /// treats every new Uint8List as a new image, so re-reading the bytes on
+  /// each build would decode every picture again.
+  final Map<String, Uint8List> _images = {};
+
   bool _busy = false;
 
   @override
   void initState() {
     super.initState();
+    _reload();
     widget.db.attachmentsRevision.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(AttachmentsSection old) {
+    super.didUpdateWidget(old);
+    if (old.nodeId != widget.nodeId) {
+      _reload();
+    }
   }
 
   @override
@@ -41,22 +62,49 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
 
   void _changed() {
     if (mounted) {
-      setState(() {});
+      setState(_reload);
     }
+  }
+
+  void _reload() {
+    final nodeId = widget.nodeId;
+    _list = nodeId == null ? const [] : _attachments.forNode(nodeId);
+    for (final attachment in _list) {
+      if (attachment.isImage &&
+          attachment.hasBytes &&
+          !_images.containsKey(attachment.sha256)) {
+        final bytes = _attachments.bytes(attachment.sha256);
+        if (bytes != null) {
+          _images[attachment.sha256] = bytes;
+        }
+      }
+    }
+    // Bytes of files attached elsewhere are fetched only now that someone
+    // is looking at them.
+    widget.db.wantBlobs([
+      for (final attachment in _list)
+        if (!attachment.hasBytes) attachment.sha256,
+    ]);
   }
 
   Future<void> _attach(String nodeId) async {
     setState(() => _busy = true);
     try {
-      final picked = await pickFiles();
+      final picked = await pickFiles(maxBytes: maxAttachmentBytes);
       final refused = <String>[];
       for (final file in picked) {
+        final bytes = file.bytes;
+        if (bytes == null) {
+          refused.add('${file.name} is ${formatSize(file.size)}; the limit is '
+              '${formatSize(maxAttachmentBytes)}.');
+          continue;
+        }
         try {
           _attachments.add(
             nodeId: nodeId,
             filename: file.name,
             mimeType: guessMimeType(file.name, file.mimeType),
-            bytes: file.bytes,
+            bytes: bytes,
           );
         } on AttachmentException catch (e) {
           refused.add(e.message);
@@ -76,11 +124,10 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
   void _download(Attachment attachment) {
     final bytes = _attachments.bytes(attachment.sha256);
     if (bytes == null) {
-      _snack('${attachment.filename} has not been downloaded yet. '
-          'It arrives with the next sync.');
+      _snack('${attachment.filename} is still downloading.');
       return;
     }
-    saveFile(bytes, attachment.filename, attachment.mimeType);
+    saveFile(bytes, attachment.filename);
   }
 
   Future<void> _remove(Attachment attachment) async {
@@ -88,11 +135,7 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
     await widget.db.flush();
   }
 
-  Future<void> _showImage(Attachment attachment) async {
-    final bytes = _attachments.bytes(attachment.sha256);
-    if (bytes == null) {
-      return;
-    }
+  Future<void> _showImage(Attachment attachment, Uint8List bytes) async {
     await showDialog<void>(
       context: context,
       builder: (context) => Dialog(
@@ -128,9 +171,6 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
   @override
   Widget build(BuildContext context) {
     final nodeId = widget.nodeId;
-    final attachments =
-        nodeId == null ? const <Attachment>[] : _attachments.forNode(nodeId);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -141,7 +181,7 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
             child: Text('Save the page to attach images and files.'),
           )
         else ...[
-          for (final attachment in attachments) _tile(attachment),
+          for (final attachment in _list) _tile(attachment),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: OutlinedButton.icon(
@@ -161,9 +201,8 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
       icon: const Icon(Icons.close),
       onPressed: () => _remove(attachment),
     );
-    final bytes =
-        attachment.isImage ? _attachments.bytes(attachment.sha256) : null;
-    if (bytes != null) {
+    final bytes = _images[attachment.sha256];
+    if (attachment.isImage && bytes != null) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
@@ -174,7 +213,7 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
                 button: true,
                 label: 'Image ${attachment.filename}',
                 child: InkWell(
-                  onTap: () => _showImage(attachment),
+                  onTap: () => _showImage(attachment, bytes),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxHeight: 240),
                     child: Image.memory(
@@ -202,10 +241,9 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
       title: Text(attachment.filename),
       subtitle: Text(attachment.hasBytes
           ? formatSize(attachment.size)
-          : '${formatSize(attachment.size)} -- not downloaded yet'),
+          : '${formatSize(attachment.size)} -- downloading'),
       onTap: () => _download(attachment),
       trailing: remove,
     );
   }
-
 }
