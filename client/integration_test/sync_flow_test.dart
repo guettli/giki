@@ -36,6 +36,7 @@ import 'package:giki/db/link_index.dart';
 import 'package:giki/db/srs_merge.dart';
 import 'package:giki/db/repository.dart';
 import 'package:giki/main.dart';
+import 'package:giki/pages/study_page.dart';
 import 'package:giki/pages/wiki_page.dart';
 import 'package:giki/srs/srs.dart';
 import 'package:giki/sync/api_client.dart';
@@ -986,6 +987,97 @@ void main() {
     expect(find.text('Attach files'), findsNothing,
         reason: 'a file attached now would go into the deleted page');
     expect(find.textContaining('Restore the page'), findsOneWidget);
+  });
+
+  // "Answer shown" was a flag of the page, not of a card. When a sync took the
+  // shown card away (deleted, or answered, on another device), the next card
+  // appeared with its answer already visible, and the rating recorded no
+  // recall at all.
+  testWidgets('a card that replaces the shown one starts hidden',
+      (tester) async {
+    final cards = CardRepository(db);
+    cards.save(front: 'Capital of France?', back: 'Paris');
+    cards.save(front: 'Capital of Peru?', back: 'Lima');
+    Widget study() => MaterialApp(
+          home: StudyPage(key: const ValueKey('study'), db: db, cards: cards),
+        );
+    await tester.pumpWidget(study());
+    await tester.tap(find.text('Show answer'));
+    await tester.pumpAndSettle();
+    expect(find.text('Show answer'), findsNothing);
+
+    // Another device deletes the card on screen; the next sync rebuilds.
+    final shown = cards.due().first;
+    final row = db.raw.select(
+        'SELECT created_at, created_by FROM cards WHERE id = ?',
+        [shown.cardId]).first;
+    final clock =
+        formatClock(DateTime.now().toUtc().add(const Duration(seconds: 1)));
+    db.applyDeltas([
+      Delta(
+        seq: 0,
+        table: 'cards',
+        recordId: shown.cardId,
+        op: 'UPDATE',
+        payload: {
+          'id': shown.cardId,
+          'node_id': '',
+          'front': shown.front,
+          'back': shown.back,
+          'created_at': row['created_at'],
+          'created_by': row['created_by'],
+          'updated_at': clock,
+          'updated_by': 'another-device-user',
+          'is_deleted': 1,
+        },
+      ),
+    ], db.cursor);
+    await tester.pumpWidget(study());
+    await tester.pumpAndSettle();
+
+    final next = cards.due().first;
+    expect(next.cardId, isNot(shown.cardId));
+    expect(find.text(next.front), findsOneWidget);
+    expect(find.text('Show answer'), findsOneWidget,
+        reason: 'the next card arrived with its answer already shown');
+    expect(find.text(next.back), findsNothing);
+  });
+
+  // Cards could be created but never edited or deleted, and an empty one was
+  // accepted: a blank card sat in every device's queue for good.
+  testWidgets('a card can be edited and deleted, and needs both sides',
+      (tester) async {
+    final cards = CardRepository(db);
+    final id = cards.save(nodeId: 'some-page', front: 'Tpyo?', back: 'x');
+    cards.save(id: id, front: 'Typo?', back: 'fixed');
+    final row = db.raw.select(
+        'SELECT node_id, front, back FROM cards WHERE id = ?', [id]).first;
+    expect(row['front'], 'Typo?');
+    expect(row['node_id'], 'some-page',
+        reason: 'editing the text detached the card from its page');
+
+    final pendingBefore = db.pendingCount;
+    cards.delete(id);
+    expect(cards.due().where((c) => c.cardId == id), isEmpty);
+    expect(db.pendingCount, pendingBefore + 1,
+        reason: 'the deletion was not queued for sync');
+
+    await tester.pumpWidget(MaterialApp(
+      home: StudyPage(db: db, cards: cards),
+    ));
+    await tester.tap(find.byTooltip('New card'));
+    await tester.pumpAndSettle();
+    final create = find.widgetWithText(FilledButton, 'Create');
+    expect(tester.widget<FilledButton>(create).onPressed, isNull,
+        reason: 'an empty card could be created');
+    await tester.enterText(find.byType(TextField).at(0), 'Front only');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(create).onPressed, isNull);
+    await tester.enterText(find.byType(TextField).at(1), 'and back');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(create).onPressed, isNotNull);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('text fields have an accessible name', (tester) async {

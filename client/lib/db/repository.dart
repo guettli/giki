@@ -171,9 +171,12 @@ class CardRepository {
   final GikiDatabase _db;
 
   /// Creates or updates a flashcard, optionally attached to a node.
+  ///
+  /// Without [nodeId], an update keeps the card's page: editing the text of a
+  /// card must not detach it.
   String save(
       {String? id,
-      String nodeId = '',
+      String? nodeId,
       required String front,
       required String back}) {
     final cardId = id ?? newId();
@@ -181,13 +184,23 @@ class CardRepository {
     _db.raw.execute(
       'INSERT INTO cards (id, node_id, front, back, created_at, created_by, '
       '                   updated_at, updated_by, is_deleted) '
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) '
+      "VALUES (?, COALESCE(?, ''), ?, ?, ?, ?, ?, ?, 0) "
       'ON CONFLICT (id) DO UPDATE SET '
-      '  node_id = excluded.node_id, front = excluded.front, back = excluded.back, '
+      '  node_id = CASE WHEN ? IS NULL THEN node_id ELSE excluded.node_id END, '
+      '  front = excluded.front, back = excluded.back, '
       '  updated_at = excluded.updated_at, updated_by = excluded.updated_by',
-      [cardId, nodeId, front, back, now, _db.userId, now, _db.userId],
+      [cardId, nodeId, front, back, now, _db.userId, now, _db.userId, nodeId],
     );
     return cardId;
+  }
+
+  /// Deletes a card on every device. Its schedule and history stay: they are
+  /// the user's record, and a card restored elsewhere picks them up again.
+  void delete(String id) {
+    _db.raw.execute(
+      'UPDATE cards SET is_deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?',
+      [nowClock(), _db.userId, id],
+    );
   }
 
   /// The cards due for the current user, soonest first.

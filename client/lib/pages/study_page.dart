@@ -22,7 +22,11 @@ class StudyPage extends StatefulWidget {
 }
 
 class _StudyPageState extends State<StudyPage> {
-  bool _revealed = false;
+  /// The card whose answer is showing. An id rather than a flag: every sync
+  /// rebuilds this page, and when it takes the shown card away (deleted or
+  /// answered on another device), the next one must start with its answer
+  /// hidden.
+  String? _revealedCardId;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +36,7 @@ class _StudyPageState extends State<StudyPage> {
         body: const Center(
             child: Text('Nothing due. Add a card or come back later.')),
         floatingActionButton: FloatingActionButton(
-          onPressed: _addCard,
+          onPressed: () => _editCard(null),
           tooltip: 'New card',
           child: const Icon(Icons.add),
         ),
@@ -40,6 +44,7 @@ class _StudyPageState extends State<StudyPage> {
     }
 
     final card = due.first;
+    final revealed = _revealedCardId == card.cardId;
     return Scaffold(
       body: Padding(
         padding: const EdgeInsets.all(24),
@@ -54,9 +59,24 @@ class _StudyPageState extends State<StudyPage> {
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        IconButton(
+                          tooltip: 'Edit card',
+                          icon: const Icon(Icons.edit_outlined),
+                          onPressed: () => _editCard(card),
+                        ),
+                        IconButton(
+                          tooltip: 'Delete card',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _deleteCard(card),
+                        ),
+                      ],
+                    ),
                     Text(card.front,
                         style: Theme.of(context).textTheme.headlineSmall),
-                    if (_revealed) ...[
+                    if (revealed) ...[
                       const Divider(height: 32),
                       Text(card.back,
                           style: Theme.of(context).textTheme.titleMedium),
@@ -66,9 +86,9 @@ class _StudyPageState extends State<StudyPage> {
               ),
             ),
             const Spacer(),
-            if (!_revealed)
+            if (!revealed)
               FilledButton(
-                onPressed: () => setState(() => _revealed = true),
+                onPressed: () => setState(() => _revealedCardId = card.cardId),
                 child: const Text('Show answer'),
               )
             else
@@ -87,7 +107,7 @@ class _StudyPageState extends State<StudyPage> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _addCard,
+        onPressed: () => _editCard(null),
         tooltip: 'New card',
         child: const Icon(Icons.add),
       ),
@@ -96,36 +116,29 @@ class _StudyPageState extends State<StudyPage> {
 
   void _rate(DueCard card, Rating rating) {
     widget.cards.review(card, rating);
-    setState(() => _revealed = false);
+    setState(() => _revealedCardId = null);
   }
 
-  Future<void> _addCard() async {
-    final front = TextEditingController();
-    final back = TextEditingController();
-    final created = await showDialog<bool>(
+  /// Creates a card, or edits [card].
+  Future<void> _editCard(DueCard? card) async {
+    final sides = await showDialog<(String, String)>(
+      context: context,
+      builder: (context) => _CardDialog(card: card),
+    );
+    if (sides != null) {
+      widget.cards.save(id: card?.cardId, front: sides.$1, back: sides.$2);
+      if (mounted) {
+        setState(() {});
+      }
+    }
+  }
+
+  Future<void> _deleteCard(DueCard card) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('New card'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Semantics(
-                textField: true,
-                label: 'Front',
-                child: TextField(
-                  controller: front,
-                  autofocus: true,
-                  decoration: const InputDecoration(labelText: 'Front'),
-                )),
-            Semantics(
-                textField: true,
-                label: 'Back',
-                child: TextField(
-                  controller: back,
-                  decoration: const InputDecoration(labelText: 'Back'),
-                )),
-          ],
-        ),
+        title: const Text('Delete card?'),
+        content: Text('"${card.front}" is removed on every device.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -133,18 +146,89 @@ class _StudyPageState extends State<StudyPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Create'),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
-    if (created ?? false) {
-      widget.cards.save(front: front.text.trim(), back: back.text.trim());
+    if (confirmed ?? false) {
+      widget.cards.delete(card.cardId);
       if (mounted) {
         setState(() {});
       }
     }
-    front.dispose();
-    back.dispose();
+  }
+}
+
+/// The front and back of a card, both required: a card with an empty side
+/// cannot be studied, and used to sit in the queue for good.
+///
+/// A widget of its own so that it owns the text controllers. Disposed by the
+/// caller right after showDialog returned, they were still in use by the
+/// dialog's closing animation.
+class _CardDialog extends StatefulWidget {
+  const _CardDialog({required this.card});
+
+  final DueCard? card;
+
+  @override
+  State<_CardDialog> createState() => _CardDialogState();
+}
+
+class _CardDialogState extends State<_CardDialog> {
+  late final TextEditingController _front =
+      TextEditingController(text: widget.card?.front ?? '');
+  late final TextEditingController _back =
+      TextEditingController(text: widget.card?.back ?? '');
+
+  @override
+  void dispose() {
+    _front.dispose();
+    _back.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final complete =
+        _front.text.trim().isNotEmpty && _back.text.trim().isNotEmpty;
+    return AlertDialog(
+      title: Text(widget.card == null ? 'New card' : 'Edit card'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+              textField: true,
+              label: 'Front',
+              child: TextField(
+                controller: _front,
+                autofocus: true,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(labelText: 'Front'),
+              )),
+          Semantics(
+              textField: true,
+              label: 'Back',
+              child: TextField(
+                controller: _back,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(labelText: 'Back'),
+              )),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: complete
+              ? () => Navigator.of(context)
+                  .pop((_front.text.trim(), _back.text.trim()))
+              : null,
+          child: Text(widget.card == null ? 'Create' : 'Save'),
+        ),
+      ],
+    );
   }
 }
