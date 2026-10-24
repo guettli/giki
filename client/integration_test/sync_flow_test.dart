@@ -465,7 +465,7 @@ void main() {
   /// of this helper sent a partial row, and the NOT NULL constraint on
   /// created_at rejected it -- a test bug, but a reminder that a delta is a
   /// whole row, never a patch.
-  void receiveRemoteEdit(String id, String body) {
+  void receiveRemoteEdit(String id, String body, {bool deleted = false}) {
     final node = nodes.byId(id)!;
     final createdAt = db.raw.select(
         'SELECT created_at, created_by FROM nodes WHERE id = ?', [id]).first;
@@ -486,7 +486,7 @@ void main() {
           'created_by': createdAt['created_by'],
           'updated_at': clock,
           'updated_by': 'another-device-user',
-          'is_deleted': 0,
+          'is_deleted': deleted ? 1 : 0,
         },
       ),
     ], db.cursor);
@@ -583,6 +583,49 @@ void main() {
         reason: 'choosing their version still wrote mine');
     expect(nodes.byId(id)!.body, 'their newer edit');
     expect(find.text('their newer edit'), findsOneWidget);
+  });
+
+  // Exploratory testing: a page deleted on another device while it was open
+  // here gave no sign, and Save wrote the edit into the tombstone -- "Saved
+  // locally", then the page and the text were gone from every device.
+  testWidgets('an open page deleted elsewhere says so', (tester) async {
+    final id = nodes.save(title: 'Doomed', body: 'still here');
+    await openEditor(tester, id);
+
+    receiveRemoteEdit(id, 'still here', deleted: true);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('deleted on another device'), findsWidgets,
+        reason: 'the editor gave no sign the page is gone');
+    expect(find.text('still here'), findsOneWidget,
+        reason: 'the text should stay visible, to copy or restore');
+  });
+
+  testWidgets('saving into a page deleted elsewhere asks first',
+      (tester) async {
+    final id = nodes.save(title: 'Doomed twice', body: 'original');
+    await openEditor(tester, id);
+
+    await tester.enterText(find.byType(TextField).at(1), 'typed after delete');
+    await tester.pump();
+    receiveRemoteEdit(id, 'original', deleted: true);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+
+    final pendingBefore = db.pendingCount;
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Deleted on another device'), findsOneWidget,
+        reason: 'Save wrote into a deleted page without asking');
+
+    await tester.tap(find.text('Restore with my text'));
+    await tester.pumpAndSettle();
+    expect(nodes.byId(id)?.body, 'typed after delete',
+        reason: 'the edit went into a tombstone instead of restoring the page');
+    expect(db.pendingCount, pendingBefore + 1,
+        reason: 'the restore was not queued for sync');
+    expect(find.textContaining('deleted on another device'), findsNothing);
   });
 
   // Backlinks used to know only about pages saved on this device: deltas
