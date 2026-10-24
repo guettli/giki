@@ -9,7 +9,7 @@
 # Build it by hand with:
 #
 #   tool/fetch-sqlite-wasm.sh
-#   (cd client && flutter build web --release)
+#   (cd client && flutter build web --release --no-web-resources-cdn)
 #   docker build -f docker/Dockerfile -t giki .
 
 FROM golang:1.26 AS build

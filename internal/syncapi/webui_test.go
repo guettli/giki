@@ -62,20 +62,16 @@ func TestWebUIServesTheApp(t *testing.T) {
 func TestWebUICacheHeaders(t *testing.T) {
 	handler := WebUI(webDir(t))
 
-	// A cached shell or service worker means a user keeps running the previous
-	// build after a deploy, which for a local-first app means the old schema.
-	for _, path := range []string{"/", "/index.html", "/flutter_service_worker.js"} {
+	// None of these names carries a content hash. A cached main.dart.js under
+	// a fresh index.html ran the previous build for up to an hour after a
+	// deploy; for a local-first app that means the old schema. no-cache still
+	// lets the browser keep the bytes: it revalidates, and gets a 304.
+	for _, path := range []string{"/", "/index.html", "/main.dart.js", "/sqlite3.wasm", "/assets/db/schema.sql"} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
 			t.Errorf("GET %s Cache-Control = %q, want no-cache", path, got)
 		}
-	}
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/main.dart.js", nil))
-	if got := rec.Header().Get("Cache-Control"); got == "no-cache" || got == "" {
-		t.Errorf("GET /main.dart.js Cache-Control = %q, want it cacheable", got)
 	}
 }
 

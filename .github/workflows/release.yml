@@ -90,7 +90,7 @@ jobs:
           tool/fetch-sqlite-wasm.sh
           cd client
           flutter pub get
-          flutter build web --release
+          flutter build web --release --no-web-resources-cdn
 
       - uses: docker/setup-buildx-action@v3
         if: steps.version.outputs.skip != 'true'
