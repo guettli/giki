@@ -22,7 +22,11 @@ class StudyPage extends StatefulWidget {
 }
 
 class _StudyPageState extends State<StudyPage> {
-  bool _revealed = false;
+  /// The card whose answer is showing. An id rather than a flag: every sync
+  /// rebuilds this page, and when it takes the shown card away (deleted or
+  /// answered on another device), the next one must start with its answer
+  /// hidden.
+  String? _revealedCardId;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +44,7 @@ class _StudyPageState extends State<StudyPage> {
     }
 
     final card = due.first;
+    final revealed = _revealedCardId == card.cardId;
     return Scaffold(
       body: Padding(
         padding: const EdgeInsets.all(24),
@@ -56,7 +61,7 @@ class _StudyPageState extends State<StudyPage> {
                   children: [
                     Text(card.front,
                         style: Theme.of(context).textTheme.headlineSmall),
-                    if (_revealed) ...[
+                    if (revealed) ...[
                       const Divider(height: 32),
                       Text(card.back,
                           style: Theme.of(context).textTheme.titleMedium),
@@ -66,9 +71,9 @@ class _StudyPageState extends State<StudyPage> {
               ),
             ),
             const Spacer(),
-            if (!_revealed)
+            if (!revealed)
               FilledButton(
-                onPressed: () => setState(() => _revealed = true),
+                onPressed: () => setState(() => _revealedCardId = card.cardId),
                 child: const Text('Show answer'),
               )
             else
@@ -96,7 +101,7 @@ class _StudyPageState extends State<StudyPage> {
 
   void _rate(DueCard card, Rating rating) {
     widget.cards.review(card, rating);
-    setState(() => _revealed = false);
+    setState(() => _revealedCardId = null);
   }
 
   Future<void> _addCard() async {
