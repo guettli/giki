@@ -369,7 +369,11 @@ class _NodeEditorState extends State<NodeEditor> {
             ),
           ),
           const SizedBox(height: 24),
-          AttachmentsSection(db: widget.db, nodeId: node?.id),
+          AttachmentsSection(
+            db: widget.db,
+            nodeId: node?.id,
+            pageDeleted: _deletedElsewhere,
+          ),
           const SizedBox(height: 16),
           if (targets.isNotEmpty) ...[
             Text('Links out', style: Theme.of(context).textTheme.titleSmall),

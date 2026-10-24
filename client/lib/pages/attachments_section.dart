@@ -12,13 +12,22 @@ import '../files/browser_files.dart';
 
 /// Lists and adds the attachments of one page.
 class AttachmentsSection extends StatefulWidget {
-  const AttachmentsSection({required this.db, required this.nodeId, super.key});
+  const AttachmentsSection({
+    required this.db,
+    required this.nodeId,
+    this.pageDeleted = false,
+    super.key,
+  });
 
   final GikiDatabase db;
 
   /// The page, or null while it has never been saved: an attachment needs a
   /// page id to point at.
   final String? nodeId;
+
+  /// True while another device has deleted the page: a file attached now
+  /// would belong to a page nobody can see.
+  final bool pageDeleted;
 
   @override
   State<AttachmentsSection> createState() => _AttachmentsSectionState();
@@ -182,14 +191,20 @@ class _AttachmentsSectionState extends State<AttachmentsSection> {
           )
         else ...[
           for (final attachment in _list) _tile(attachment),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: OutlinedButton.icon(
-              onPressed: _busy ? null : () => _attach(nodeId),
-              icon: const Icon(Icons.attach_file),
-              label: const Text('Attach files'),
+          if (widget.pageDeleted)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text('Restore the page by saving it to attach files.'),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : () => _attach(nodeId),
+                icon: const Icon(Icons.attach_file),
+                label: const Text('Attach files'),
+              ),
             ),
-          ),
         ],
       ],
     );

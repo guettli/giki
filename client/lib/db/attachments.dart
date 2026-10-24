@@ -90,6 +90,16 @@ class AttachmentRepository {
           '$filename is ${_mib(bytes.length)}; the limit is '
           '${_mib(maxAttachmentBytes)}.');
     }
+    // The page may have been deleted on another device since the editor
+    // opened. A row pointing at the tombstone syncs everywhere and is shown
+    // nowhere.
+    final live = _db.raw.select(
+        'SELECT 1 FROM nodes WHERE id = ? AND is_deleted = 0', [nodeId]);
+    if (live.isEmpty) {
+      throw AttachmentException(
+          '$filename was not attached: the page was deleted on another '
+          'device.');
+    }
     final key = blobKey(bytes);
     final id = newId();
     final now = _db.now();

@@ -952,6 +952,42 @@ void main() {
     expect(attachments.pendingUploads(), isEmpty);
   });
 
+  // A file attached to a page another device had deleted was stored against
+  // the tombstone: the server kept a live attachment row, and the page and
+  // the file were invisible on every device.
+  testWidgets('a file cannot be attached to a deleted page', (_) async {
+    final attachments = AttachmentRepository(db);
+    final pageId = nodes.save(title: 'Gone', body: 'scans');
+    receiveRemoteEdit(pageId, 'scans', deleted: true);
+    final pendingBefore = db.pendingCount;
+    expect(
+      () => attachments.add(
+        nodeId: pageId,
+        filename: 'orange.png',
+        mimeType: 'image/png',
+        bytes: Uint8List.fromList([1, 2, 3]),
+      ),
+      throwsA(isA<AttachmentException>()),
+    );
+    expect(db.pendingCount, pendingBefore);
+    expect(attachments.pendingUploads(), isEmpty);
+  });
+
+  testWidgets('an open page deleted elsewhere offers no attach button',
+      (tester) async {
+    final id = nodes.save(title: 'Doomed thrice', body: 'scans');
+    await openEditor(tester, id);
+    expect(find.text('Attach files'), findsOneWidget);
+
+    receiveRemoteEdit(id, 'scans', deleted: true);
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Attach files'), findsNothing,
+        reason: 'a file attached now would go into the deleted page');
+    expect(find.textContaining('Restore the page'), findsOneWidget);
+  });
+
   testWidgets('text fields have an accessible name', (tester) async {
     // Flutter renders InputDecoration's label as a sibling node, so without
     // explicit semantics the editable element reaches assistive technology
