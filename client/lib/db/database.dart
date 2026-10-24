@@ -26,9 +26,17 @@ class GikiDatabase {
     // the ones no Dart code performs. A count maintained by hand would be
     // correct only until the next repository method forgot to announce
     // itself -- which is exactly how the badge came to be wrong.
-    _outboxWatch = raw.updates
-        .where((update) => update.tableName == 'sync_outbox')
-        .listen((_) => refreshPendingCount());
+    _outboxWatch = raw.updates.listen((update) {
+      switch (update.tableName) {
+        case 'sync_outbox':
+          refreshPendingCount();
+        case 'nodes':
+          // Fires for deltas as well as local writes: sync_mute silences the
+          // outbox triggers, not SQLite's update hook. That is what lets an
+          // open editor notice its page changed underneath it.
+          nodesRevision.value++;
+      }
+    });
   }
 
   /// The underlying SQLite handle. Exposed so repositories can run their own
@@ -42,6 +50,10 @@ class GikiDatabase {
   /// not reached the server, so it has to follow the outbox rather than
   /// whatever the last rebuild happened to see.
   final ValueNotifier<int> pendingChanges = ValueNotifier<int>(0);
+
+  /// Bumped whenever any row in `nodes` changes, locally or from a delta.
+  /// Listeners re-read what they care about; the value itself means nothing.
+  final ValueNotifier<int> nodesRevision = ValueNotifier<int>(0);
 
   /// Where the database lives inside the virtual file system. SimpleOpfsFileSystem
   /// can only persist a file called `/database`, so that name is not ours to
@@ -118,6 +130,7 @@ class GikiDatabase {
   void close() {
     unawaited(_outboxWatch.cancel());
     pendingChanges.dispose();
+    nodesRevision.dispose();
     raw.close();
   }
 

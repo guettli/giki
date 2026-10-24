@@ -452,6 +452,135 @@ void main() {
     await sync.syncOnce();
   });
 
+  /// Writes a newer version of a node into the local database the way the
+  /// sync worker does -- through applyDeltas, under sync_mute -- as if another
+  /// device had edited it and this one had just pulled the change.
+  ///
+  /// The payload is the full row, as the server's ChangeLog always holds it:
+  /// the server stamps created_at onto every row it accepts. An early version
+  /// of this helper sent a partial row, and the NOT NULL constraint on
+  /// created_at rejected it -- a test bug, but a reminder that a delta is a
+  /// whole row, never a patch.
+  void receiveRemoteEdit(String id, String body) {
+    final node = nodes.byId(id)!;
+    final createdAt = db.raw.select(
+        'SELECT created_at, created_by FROM nodes WHERE id = ?', [id]).first;
+    final clock =
+        formatClock(DateTime.now().toUtc().add(const Duration(seconds: 1)));
+    db.applyDeltas([
+      Delta(
+        seq: 0,
+        table: 'nodes',
+        recordId: id,
+        op: 'UPDATE',
+        payload: {
+          'id': id,
+          'title': node.title,
+          'title_key': node.titleKey,
+          'body': body,
+          'created_at': createdAt['created_at'],
+          'created_by': createdAt['created_by'],
+          'updated_at': clock,
+          'updated_by': 'another-device-user',
+          'is_deleted': 0,
+        },
+      ),
+    ], db.cursor);
+  }
+
+  Future<void> openEditor(WidgetTester tester, String id) async {
+    await tester.pumpWidget(MaterialApp(
+      home: NodeEditor(db: db, nodes: nodes, nodeId: id),
+    ));
+    await tester.pumpAndSettle();
+  }
+
+  // The scenario exploratory testing found: pressing Save on a page you never
+  // touched used to stamp it with a fresh updated_at, which under
+  // Last-Write-Wins beat a newer edit from another device and erased it.
+  testWidgets('saving an unchanged page writes nothing', (tester) async {
+    final id = nodes.save(title: 'Untouched', body: 'as it was');
+    await sync.syncOnce();
+    final versionBefore = nodes.byId(id)!.updatedAt;
+    final pendingBefore = db.pendingCount;
+
+    await openEditor(tester, id);
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+
+    expect(db.pendingCount, pendingBefore,
+        reason: 'an unchanged save queued a write');
+    expect(nodes.byId(id)!.updatedAt, versionBefore,
+        reason: 'an unchanged save gave the page a new timestamp');
+    expect(find.text('No changes to save.'), findsOneWidget);
+  });
+
+  // The ordinary case, and the one an earlier version of the fix broke: the
+  // "unchanged" check captured the typed text as the saved text, so editing an
+  // existing page and pressing Save wrote nothing at all.
+  testWidgets('editing an existing page and saving writes it', (tester) async {
+    final id = nodes.save(title: 'Editable', body: 'before');
+    await sync.syncOnce();
+    final pendingBefore = db.pendingCount;
+
+    await openEditor(tester, id);
+    await tester.enterText(find.byType(TextField).at(1), 'after');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+
+    expect(nodes.byId(id)!.body, 'after', reason: 'the edit was not saved');
+    expect(db.pendingCount, pendingBefore + 1,
+        reason: 'the edit was not queued for sync');
+    expect(find.text('No changes to save.'), findsNothing);
+  });
+
+  testWidgets('an open editor shows a newer version that arrives',
+      (tester) async {
+    final id = nodes.save(title: 'Shared', body: 'the version I opened');
+    await openEditor(tester, id);
+    expect(find.text('the version I opened'), findsOneWidget);
+
+    receiveRemoteEdit(id, 'the version another device wrote');
+    // The update hook is asynchronous; give it a turn.
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+
+    expect(find.text('the version another device wrote'), findsOneWidget,
+        reason: 'the editor kept showing a stale body');
+    expect(find.text('the version I opened'), findsNothing);
+  });
+
+  testWidgets('saving over a newer version asks first', (tester) async {
+    final id = nodes.save(title: 'Contested', body: 'original');
+    await openEditor(tester, id);
+
+    // The user types; meanwhile another device's edit arrives.
+    await tester.enterText(find.byType(TextField).at(1), 'my unsaved edit');
+    await tester.pump();
+    receiveRemoteEdit(id, 'their newer edit');
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+
+    // The user's text is kept, and they are told.
+    expect(find.text('my unsaved edit'), findsOneWidget);
+    expect(find.textContaining('changed on another device'), findsWidgets);
+
+    final pendingBefore = db.pendingCount;
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Changed on another device'), findsOneWidget,
+        reason: 'Save overwrote a newer version without asking');
+
+    // Choosing theirs writes nothing and shows their text.
+    await tester.tap(find.text('Show their version'));
+    await tester.pumpAndSettle();
+    expect(db.pendingCount, pendingBefore,
+        reason: 'choosing their version still wrote mine');
+    expect(nodes.byId(id)!.body, 'their newer edit');
+    expect(find.text('their newer edit'), findsOneWidget);
+  });
+
   testWidgets('text fields have an accessible name', (tester) async {
     // Flutter renders InputDecoration's label as a sibling node, so without
     // explicit semantics the editable element reaches assistive technology
