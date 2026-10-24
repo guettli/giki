@@ -112,6 +112,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("POST /api/v1/sync", s.handleSync)
 	mux.HandleFunc("GET /api/v1/history", s.handleHistory)
+	mux.HandleFunc("PUT /api/v1/blobs/{sha256}", s.handlePutBlob)
+	mux.HandleFunc("GET /api/v1/blobs/{sha256}", s.handleGetBlob)
 
 	mux.HandleFunc("POST /api/v1/auth/passkey/register/begin", s.handleRegisterBegin)
 	mux.HandleFunc("POST /api/v1/auth/passkey/register/finish", s.handleRegisterFinish)

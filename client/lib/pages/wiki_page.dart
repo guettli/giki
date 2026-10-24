@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../db/database.dart';
 import '../db/repository.dart';
 import '../wiki/wikilink.dart';
+import 'attachments_section.dart';
 
 /// Lists the most recently edited nodes.
 class WikiPage extends StatefulWidget {
@@ -368,6 +369,8 @@ class _NodeEditorState extends State<NodeEditor> {
             ),
           ),
           const SizedBox(height: 24),
+          AttachmentsSection(db: widget.db, nodeId: node?.id),
+          const SizedBox(height: 16),
           if (targets.isNotEmpty) ...[
             Text('Links out', style: Theme.of(context).textTheme.titleSmall),
             for (final target in targets)

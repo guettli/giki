@@ -51,8 +51,9 @@ func CORS(allowedOrigins []string, next http.Handler) http.Handler {
 				// DELETE is here for /api/v1/auth/passkeys/{id}: without it a
 				// split-origin deployment (which is what -cors-origin is for)
 				// fails the preflight and "remove passkey" never reaches the
-				// server.
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+				// server. PUT is for /api/v1/blobs/{sha256}, the attachment
+				// upload.
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 				w.Header().Set("Access-Control-Max-Age", "600")
 			}

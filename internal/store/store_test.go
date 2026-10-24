@@ -105,11 +105,12 @@ func TestTriggerPayloadsMatchRegistry(t *testing.T) {
 	clientDB := openClientDB(t)
 	clock := "2026-10-23T10:00:00.000Z"
 	inserts := map[string]string{
-		"users":      `INSERT INTO users (id, created_at, updated_at) VALUES ('u1', ?, ?)`,
-		"nodes":      `INSERT INTO nodes (id, title, title_key, created_at, updated_at) VALUES ('n1', 'T', 't', ?, ?)`,
-		"cards":      `INSERT INTO cards (id, created_at, updated_at) VALUES ('c1', ?, ?)`,
-		"srs_state":  `INSERT INTO srs_state (id, card_id, user_id, due_at, created_at, updated_at) VALUES ('s1', 'c1', 'u1', '2026-10-24T00:00:00.000Z', ?, ?)`,
-		"review_log": `INSERT INTO review_log (id, card_id, user_id, reviewed_at, rating, created_at, updated_at) VALUES ('r1', 'c1', 'u1', '2026-10-23T10:00:00.000Z', 2, ?, ?)`,
+		"users":       `INSERT INTO users (id, created_at, updated_at) VALUES ('u1', ?, ?)`,
+		"nodes":       `INSERT INTO nodes (id, title, title_key, created_at, updated_at) VALUES ('n1', 'T', 't', ?, ?)`,
+		"cards":       `INSERT INTO cards (id, created_at, updated_at) VALUES ('c1', ?, ?)`,
+		"srs_state":   `INSERT INTO srs_state (id, card_id, user_id, due_at, created_at, updated_at) VALUES ('s1', 'c1', 'u1', '2026-10-24T00:00:00.000Z', ?, ?)`,
+		"review_log":  `INSERT INTO review_log (id, card_id, user_id, reviewed_at, rating, created_at, updated_at) VALUES ('r1', 'c1', 'u1', '2026-10-23T10:00:00.000Z', 2, ?, ?)`,
+		"attachments": `INSERT INTO attachments (id, node_id, sha256, filename, mime_type, size, created_at, updated_at) VALUES ('a1', 'n1', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'empty.txt', 'text/plain', 0, ?, ?)`,
 	}
 	if len(inserts) != len(SyncableTables()) {
 		t.Fatalf("this test covers %d tables, but %d are syncable", len(inserts), len(SyncableTables()))

@@ -6,7 +6,9 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
+import '../db/attachments.dart';
 import '../db/database.dart';
 import 'api_client.dart';
 
@@ -20,6 +22,8 @@ class SyncReport {
     required this.pulled,
     required this.cursor,
     required this.hasMore,
+    this.uploaded = 0,
+    this.fetched = 0,
   });
 
   /// An empty report, for "nothing to do".
@@ -29,7 +33,9 @@ class SyncReport {
         stale = 0,
         rejected = const [],
         pulled = 0,
-        hasMore = false;
+        hasMore = false,
+        uploaded = 0,
+        fetched = 0;
 
   final int pushed;
   final int applied;
@@ -45,9 +51,14 @@ class SyncReport {
   /// True when more deltas are waiting on the server.
   final bool hasMore;
 
+  /// Attachment blobs sent to and received from the server.
+  final int uploaded;
+  final int fetched;
+
   @override
   String toString() => 'pushed $pushed (applied $applied, stale $stale, '
-      'rejected ${rejected.length}), pulled $pulled, cursor $cursor';
+      'rejected ${rejected.length}), pulled $pulled, cursor $cursor'
+      '${uploaded + fetched > 0 ? ', files up $uploaded down $fetched' : ''}';
 }
 
 /// Drains the outbox and applies deltas.
@@ -57,10 +68,14 @@ class SyncService {
     required SyncApiClient api,
     this.batchSize = 500,
   })  : _db = db,
-        _api = api;
+        _api = api,
+        _attachments = AttachmentRepository(db) {
+    _db.blobsWanted.addListener(_onBlobsWanted);
+  }
 
   final GikiDatabase _db;
   final SyncApiClient _api;
+  final AttachmentRepository _attachments;
 
   /// How many outbox rows go into one request.
   final int batchSize;
@@ -97,7 +112,64 @@ class SyncService {
   /// Releases resources.
   Future<void> dispose() async {
     stop();
+    _db.blobsWanted.removeListener(_onBlobsWanted);
     await _reports.close();
+  }
+
+  void _onBlobsWanted() {
+    unawaited(fetchWantedBlobs().catchError((Object _) => 0));
+  }
+
+  /// Downloads the blobs an open page asked for (GikiDatabase.wantBlobs).
+  /// Returns how many arrived.
+  ///
+  /// Concurrent callers share one run, and that run keeps going until no
+  /// wanted hash is left untried -- so a page that asks while a fetch is in
+  /// flight is served by it rather than by the next round.
+  ///
+  /// A hash the server does not know is dropped from the wish list rather
+  /// than asked for again on every round; opening the page asks again.
+  Future<int> fetchWantedBlobs() =>
+      _fetch ??= _fetchWanted().whenComplete(() => _fetch = null);
+
+  Future<int>? _fetch;
+
+  Future<int> _fetchWanted() async {
+    var fetched = 0;
+    final tried = <String>{};
+    while (true) {
+      _db.wantedBlobs.removeWhere((key) => _attachments.missing([key]).isEmpty);
+      final next = _db.wantedBlobs.difference(tried);
+      if (next.isEmpty) {
+        break;
+      }
+      for (final key in next) {
+        tried.add(key);
+        try {
+          if (_attachments.storeFetched(key, await _api.getBlob(key))) {
+            fetched++;
+          }
+          _db.wantedBlobs.remove(key);
+        } on SyncApiException catch (e) {
+          if (e.statusCode == 404) {
+            _db.wantedBlobs.remove(key);
+          }
+        } on ArgumentError {
+          // Not a hash at all; no request is ever going to fetch it.
+          _db.wantedBlobs.remove(key);
+        } on Object {
+          // Offline or a dropped connection: keep the wish, try next round.
+          if (fetched > 0) {
+            await _db.flush();
+          }
+          return fetched;
+        }
+      }
+    }
+    if (fetched > 0) {
+      await _db.flush();
+    }
+    return fetched;
   }
 
   /// Runs one push-and-pull round trip.
@@ -110,7 +182,39 @@ class SyncService {
     }
     _running = true;
     try {
-      final pending = _db.readOutbox(limit: batchSize);
+      // Read the outbox FIRST, then upload every pending blob. A row is
+      // written in the same transaction as its blob, so every attachment row
+      // in this read has its blob in the list that follows; the other order
+      // would let a file attached mid-upload push its row ahead of its bytes.
+      // (The server refuses such a row anyway, see apply.go.)
+      final outbox = _db.readOutbox(limit: batchSize);
+
+      // A blob that fails to upload holds back only the rows that point at
+      // it; everything else -- text edits, reviews, other files -- syncs.
+      final failed = <String>{};
+      var uploaded = 0;
+      for (final key in _attachments.pendingUploads()) {
+        final bytes = _attachments.bytes(key);
+        try {
+          if (bytes != null) {
+            await _api.putBlob(key, bytes);
+          }
+          _attachments.markUploaded(key);
+          uploaded++;
+        } on Object {
+          // Refused, timed out on a slow link, or offline. If offline, the
+          // sync call below fails too; otherwise the round goes on without
+          // this file, and the next round uploads it again.
+          failed.add(key);
+        }
+      }
+      if (uploaded > 0) {
+        await _db.flush();
+      }
+      final pending = [
+        for (final entry in outbox)
+          if (!_waitsForBlob(entry, failed)) entry,
+      ];
       final response = await _api.sync(
         deviceId: _db.deviceId,
         cursor: _db.cursor,
@@ -147,6 +251,9 @@ class SyncService {
       _db.forgetOutbox(settled);
       await _db.flush();
 
+      // Pages that are open may be waiting for bytes this round can bring.
+      final fetched = await fetchWantedBlobs();
+
       final report = SyncReport(
         pushed: pending.length,
         applied: applied,
@@ -155,6 +262,8 @@ class SyncService {
         pulled: response.changes.length,
         cursor: response.cursor,
         hasMore: response.hasMore,
+        uploaded: uploaded,
+        fetched: fetched,
       );
       if (!_reports.isClosed) {
         _reports.add(report);
@@ -180,5 +289,14 @@ class SyncService {
       }
     }
     return report;
+  }
+
+  /// True for an attachment row whose blob did not upload this round.
+  static bool _waitsForBlob(OutboxEntry entry, Set<String> failed) {
+    if (failed.isEmpty || entry.table != 'attachments') {
+      return false;
+    }
+    final payload = jsonDecode(entry.payload) as Map<String, Object?>;
+    return payload['is_deleted'] != 1 && failed.contains(payload['sha256']);
   }
 }

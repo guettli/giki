@@ -194,3 +194,58 @@ CREATE TRIGGER IF NOT EXISTS review_log_outbox_delete AFTER DELETE ON review_log
            OLD.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     WHERE NOT EXISTS (SELECT 1 FROM sync_mute);
 END;
+
+CREATE TRIGGER IF NOT EXISTS attachments_outbox_insert AFTER INSERT ON attachments BEGIN
+    INSERT INTO sync_outbox (table_name, record_id, op, payload, updated_at, created_at)
+    SELECT 'attachments', NEW.id, 'INSERT',
+           json_object('id', NEW.id, 'node_id', NEW.node_id, 'sha256', NEW.sha256,
+                       'filename', NEW.filename, 'mime_type', NEW.mime_type,
+                       'size', NEW.size, 'created_at', NEW.created_at,
+                       'created_by', NEW.created_by, 'updated_at', NEW.updated_at,
+                       'updated_by', NEW.updated_by, 'is_deleted', NEW.is_deleted),
+           NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE NOT EXISTS (SELECT 1 FROM sync_mute);
+END;
+
+CREATE TRIGGER IF NOT EXISTS attachments_outbox_update AFTER UPDATE ON attachments BEGIN
+    INSERT INTO sync_outbox (table_name, record_id, op, payload, updated_at, created_at)
+    SELECT 'attachments', NEW.id, 'UPDATE',
+           json_object('id', NEW.id, 'node_id', NEW.node_id, 'sha256', NEW.sha256,
+                       'filename', NEW.filename, 'mime_type', NEW.mime_type,
+                       'size', NEW.size, 'created_at', NEW.created_at,
+                       'created_by', NEW.created_by, 'updated_at', NEW.updated_at,
+                       'updated_by', NEW.updated_by, 'is_deleted', NEW.is_deleted),
+           NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE NOT EXISTS (SELECT 1 FROM sync_mute);
+END;
+
+CREATE TRIGGER IF NOT EXISTS attachments_outbox_delete AFTER DELETE ON attachments BEGIN
+    INSERT INTO sync_outbox (table_name, record_id, op, payload, updated_at, created_at)
+    SELECT 'attachments', OLD.id, 'DELETE', json_object('id', OLD.id),
+           OLD.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE NOT EXISTS (SELECT 1 FROM sync_mute);
+END;
+
+-- ---------------------------------------------------------------------------
+-- Attachment bytes (local, NOT synced through the outbox)
+-- ---------------------------------------------------------------------------
+--
+-- The local copy of every blob this device has, keyed by SHA-256. `uploaded`
+-- is 0 until the server confirmed it holds the bytes; the sync worker uploads
+-- those BEFORE pushing the outbox, so no other device ever learns of an
+-- attachment whose bytes the server does not have.
+--
+-- Deliberately a rowid table: SQLite's update hook, which is how the UI hears
+-- that bytes arrived, does not fire for WITHOUT ROWID tables.
+--
+-- Bytes of other devices' attachments are fetched on demand, when a page that
+-- shows them is opened -- not eagerly: the knowledge base is shared, and every
+-- tab holding every file would not scale.
+CREATE TABLE IF NOT EXISTS blobs (
+    sha256     TEXT    PRIMARY KEY,
+    size       INTEGER NOT NULL,
+    data       BLOB    NOT NULL,
+    uploaded   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS blobs_pending ON blobs (sha256) WHERE uploaded = 0;

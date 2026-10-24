@@ -47,6 +47,11 @@ var registry = map[string]Table{
 		"id", "card_id", "user_id", "reviewed_at", "rating", "prev_box",
 		"next_box", "created_at", "updated_at", "is_deleted",
 	}},
+	// Metadata only: the bytes travel through /api/v1/blobs, see blobs.go.
+	"attachments": {Name: "attachments", Columns: []string{
+		"id", "node_id", "sha256", "filename", "mime_type", "size",
+		"created_at", "created_by", "updated_at", "updated_by", "is_deleted",
+	}},
 }
 
 // LookupTable returns the registry entry for name.

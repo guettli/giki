@@ -80,4 +80,5 @@ const Set<String> syncableTables = {
   'cards',
   'srs_state',
   'review_log',
+  'attachments',
 };

@@ -135,3 +135,38 @@ them loses data quietly, which is why each has a test.
   query, and a decision about who may read what -- neither exists yet.
 * **No dead-letter queue.** A `rejected` mutation is reported once and dropped.
   It should be moved to a local table so it survives a reload.
+
+## Attachments
+
+An image or file is two things, synced two ways:
+
+* the **`attachments` row** (page, file name, MIME type, size, `sha256`) is
+  ordinary synced data: outbox, Last-Write-Wins, ChangeLog;
+* the **bytes** are a content-addressed blob, never in the ChangeLog:
+
+```
+PUT /api/v1/blobs/{sha256}    body: raw bytes      -> 200 {"sha256", "size"}
+GET /api/v1/blobs/{sha256}                         -> 200 raw bytes
+```
+
+The server checks that the bytes hash to the path (400 otherwise), caps a blob
+at 10 MiB (413), and stores it once; repeating an upload is a no-op. Every
+download is served as `application/octet-stream` with `Content-Disposition:
+attachment`, `nosniff` and a sandbox CSP: the type lives in the synced row, and
+user-uploaded HTML or SVG must never render on the app's origin.
+
+Order is what keeps the halves consistent. A sync round reads the outbox,
+then **uploads every pending blob**, then pushes; a row is written in the same
+transaction as its blob, so each row pushed has its bytes on the server. The
+server enforces it anyway: it **rejects a live attachment row whose blob it
+does not hold**, so no device can be handed a row it cannot download. A blob
+that fails to upload holds back only the rows that point at it; text edits and
+everything else still sync.
+
+Other devices' bytes are fetched **on demand**: a page lists its attachments
+and asks for the missing blobs, which the sync worker downloads at once (and
+re-checks against their hash). Nothing else is downloaded -- the knowledge base
+is shared, and every tab holding every file would not scale. Blobs live in
+SQLite on both sides (`blobs` table), so the server's database file remains the
+whole backup. Removing an attachment tombstones the row; the blob stays, since
+another row may share it, and nothing garbage-collects blobs yet.
