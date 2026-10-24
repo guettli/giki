@@ -4,7 +4,11 @@
 # Gating on CI (workflow_run) rather than on the push itself means a red commit
 # is never tagged or published. No GitHub Release is created: the tags are the
 # source of truth, and Renovate watches the image tags to bump the deployment
-# in the gitops repo.
+# in the gitops repo -- where the bump auto-merges on green CI.
+#
+# Renovate runs hourly there. So that prod follows main within minutes rather
+# than within the hour, the `deploy` job below starts that Renovate run as soon
+# as a new image exists.
 name: Release
 
 on:
@@ -39,6 +43,8 @@ jobs:
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      released: ${{ steps.version.outputs.skip == 'false' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -121,3 +127,24 @@ jobs:
           set -euo pipefail
           git tag "${{ steps.version.outputs.tag }}" "$HEAD_SHA"
           git push origin "${{ steps.version.outputs.tag }}"
+
+  # Asks the gitops repo to pick the new image up now. Its Renovate opens the
+  # bump PR, and a second Renovate run -- triggered there when that PR's CI
+  # finishes -- merges it; Flux deploys from there.
+  #
+  # The token lives in the `gitops-dispatch` environment, which only main may
+  # deploy to: pull requests and other branches cannot read it. For now it is
+  # the owner's admin token; a fine-grained token with only `actions: write`
+  # on guettli/gitops would do, and replacing it is one `gh secret set`.
+  deploy:
+    name: Ask gitops to deploy
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: gitops-dispatch
+    steps:
+      - name: Start the gitops Renovate run
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_DISPATCH_TOKEN }}
+        run: gh workflow run renovate.yml --repo guettli/gitops
