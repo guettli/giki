@@ -196,7 +196,14 @@ class CardRepository {
       'SELECT c.id AS card_id, c.front, c.back, '
       '       s.box, s.interval_days, s.reps, s.lapses, s.due_at '
       'FROM cards c '
-      'LEFT JOIN srs_state s ON s.card_id = c.id AND s.user_id = ? AND s.is_deleted = 0 '
+      // The newest schedule only. Normally there is exactly one per card and
+      // user, but a duplicate can still arrive from a device running an older
+      // version; joining every row would offer the card once per schedule,
+      // and keep offering it after it had been answered.
+      'LEFT JOIN srs_state s ON s.id = ('
+      '  SELECT id FROM srs_state '
+      '  WHERE card_id = c.id AND user_id = ? AND is_deleted = 0 '
+      '  ORDER BY updated_at DESC, id LIMIT 1) '
       'WHERE c.is_deleted = 0 AND (s.due_at IS NULL OR s.due_at <= ?) '
       'ORDER BY COALESCE(s.due_at, c.created_at) LIMIT ?',
       [_db.userId, deadline, limit],
@@ -232,13 +239,11 @@ class CardRepository {
     _db.raw.execute('BEGIN IMMEDIATE');
     try {
       // One srs_state row per (card, user): learning progress is personal,
-      // the knowledge base is shared.
-      final existing = _db.raw.select(
-        'SELECT id FROM srs_state WHERE card_id = ? AND user_id = ?',
-        [card.cardId, _db.userId],
-      );
-      final stateId =
-          existing.isEmpty ? newId() : existing.first['id'] as String;
+      // the knowledge base is shared. The id is derived from the pair, not
+      // looked up and minted: two devices that both review a new card while
+      // offline must create the same row, or Last-Write-Wins has nothing to
+      // merge and the card is stuck in the queue for good.
+      final stateId = srsStateId(card.cardId, _db.userId);
       _db.raw.execute(
         'INSERT INTO srs_state (id, card_id, user_id, box, interval_days, ease, '
         '                       reps, lapses, due_at, last_reviewed_at, '

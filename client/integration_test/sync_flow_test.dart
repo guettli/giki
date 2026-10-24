@@ -30,10 +30,13 @@ import 'package:giki/auth/webauthn.dart';
 import 'package:giki/auth/webauthn_json.dart';
 import 'package:giki/db/clock.dart';
 import 'package:giki/db/database.dart';
+import 'package:giki/db/ids.dart';
 import 'package:giki/db/link_index.dart';
+import 'package:giki/db/srs_merge.dart';
 import 'package:giki/db/repository.dart';
 import 'package:giki/main.dart';
 import 'package:giki/pages/wiki_page.dart';
+import 'package:giki/srs/srs.dart';
 import 'package:giki/sync/api_client.dart';
 import 'package:giki/sync/sync_service.dart';
 import 'package:http/http.dart' as http;
@@ -651,6 +654,95 @@ void main() {
 
     // And only once.
     expect(ensureLinkIndex(db.raw), 0, reason: 'the rebuild ran again');
+  });
+
+  /// Delivers a review schedule the way the sync worker does.
+  void deliverSchedule(String id, String cardId,
+      {required int box, required DateTime due, required DateTime clock}) {
+    final stamp = formatClock(clock);
+    db.applyDeltas([
+      Delta(
+        seq: 0,
+        table: 'srs_state',
+        recordId: id,
+        op: 'UPDATE',
+        payload: {
+          'id': id,
+          'card_id': cardId,
+          'user_id': db.userId,
+          'box': box,
+          'interval_days': 0,
+          'ease': 2.5,
+          'reps': 1,
+          'lapses': 0,
+          'due_at': formatClock(due),
+          'last_reviewed_at': stamp,
+          'created_at': stamp,
+          'updated_at': stamp,
+          'is_deleted': 0,
+        },
+      ),
+    ], db.cursor);
+  }
+
+  int liveSchedules(String cardId) => db.raw.select(
+      'SELECT COUNT(*) AS n FROM srs_state WHERE card_id = ? AND is_deleted = 0',
+      [cardId]).first['n'] as int;
+
+  // Exploratory testing found a card that, first reviewed on two devices,
+  // never left the study queue: each device minted its own schedule row.
+  testWidgets('a card reviewed on two devices keeps one schedule', (_) async {
+    final cards = CardRepository(db);
+    final cardId = cards.save(front: 'Two devices', back: 'one schedule');
+    final card = cards.due().firstWhere((c) => c.cardId == cardId);
+    cards.review(card, Rating.good);
+    expect(liveSchedules(cardId), 1);
+
+    // The other device computes the same id for its own first review, so its
+    // version is a version of this row, not a second row.
+    deliverSchedule(srsStateId(cardId, db.userId), cardId,
+        box: 1,
+        due: DateTime.now().toUtc(),
+        clock: DateTime.now().toUtc().add(const Duration(seconds: 1)));
+    expect(liveSchedules(cardId), 1,
+        reason: 'the other device created a second schedule for the card');
+  });
+
+  testWidgets('a duplicate schedule from an old client cannot trap a card', (
+    _,
+  ) async {
+    final cards = CardRepository(db);
+    final cardId = cards.save(front: 'Stuck?', back: 'no');
+    // What an older client produced: a schedule under a random id, due now.
+    deliverSchedule('old-client-random-id', cardId,
+        box: 1,
+        due: DateTime.now().toUtc().subtract(const Duration(minutes: 1)),
+        clock: DateTime.now().toUtc());
+
+    final card = cards.due().firstWhere((c) => c.cardId == cardId);
+    cards.review(card, Rating.good);
+
+    expect(cards.due().map((c) => c.cardId), isNot(contains(cardId)),
+        reason: 'answered "good" and still due: the zombie card');
+  });
+
+  testWidgets('duplicate schedules are merged into one', (_) async {
+    final cards = CardRepository(db);
+    final cardId = cards.save(front: 'Merge me', back: 'once');
+    final older = DateTime.now().toUtc().subtract(const Duration(hours: 1));
+    final newer = DateTime.now().toUtc();
+    deliverSchedule('dup-a', cardId, box: 2, due: newer, clock: older);
+    deliverSchedule('dup-b', cardId, box: 4, due: newer, clock: newer);
+    expect(liveSchedules(cardId), 2);
+
+    expect(mergeDuplicateSchedules(db.raw), greaterThanOrEqualTo(1));
+    expect(liveSchedules(cardId), 1);
+    final survivor = db.raw.select(
+        'SELECT id, box FROM srs_state WHERE card_id = ? AND is_deleted = 0',
+        [cardId]).first;
+    expect(survivor['id'], srsStateId(cardId, db.userId),
+        reason: 'the survivor is not the row every device agrees on');
+    expect(survivor['box'], 4, reason: 'the newest schedule did not win');
   });
 
   testWidgets('text fields have an accessible name', (tester) async {

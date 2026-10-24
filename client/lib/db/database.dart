@@ -16,6 +16,7 @@ import 'clock.dart';
 import 'ids.dart';
 import 'link_index.dart';
 import 'models.dart';
+import 'srs_merge.dart';
 
 export 'models.dart';
 
@@ -97,6 +98,9 @@ class GikiDatabase {
     // Repairs the link index of a device upgraded from a version whose deltas
     // did not maintain it. A no-op on every later start.
     ensureLinkIndex(db);
+    // Collapses review schedules duplicated by older versions, which used
+    // random ids. Finding none is one indexed query.
+    mergeDuplicateSchedules(db);
     giki.refreshPendingCount();
     await giki.flush();
     return giki;
