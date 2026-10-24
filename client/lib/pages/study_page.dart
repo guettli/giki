@@ -36,7 +36,7 @@ class _StudyPageState extends State<StudyPage> {
         body: const Center(
             child: Text('Nothing due. Add a card or come back later.')),
         floatingActionButton: FloatingActionButton(
-          onPressed: _addCard,
+          onPressed: () => _editCard(null),
           tooltip: 'New card',
           child: const Icon(Icons.add),
         ),
@@ -59,6 +59,21 @@ class _StudyPageState extends State<StudyPage> {
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        IconButton(
+                          tooltip: 'Edit card',
+                          icon: const Icon(Icons.edit_outlined),
+                          onPressed: () => _editCard(card),
+                        ),
+                        IconButton(
+                          tooltip: 'Delete card',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _deleteCard(card),
+                        ),
+                      ],
+                    ),
                     Text(card.front,
                         style: Theme.of(context).textTheme.headlineSmall),
                     if (revealed) ...[
@@ -92,7 +107,7 @@ class _StudyPageState extends State<StudyPage> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _addCard,
+        onPressed: () => _editCard(null),
         tooltip: 'New card',
         child: const Icon(Icons.add),
       ),
@@ -104,13 +119,15 @@ class _StudyPageState extends State<StudyPage> {
     setState(() => _revealedCardId = null);
   }
 
-  Future<void> _addCard() async {
-    final front = TextEditingController();
-    final back = TextEditingController();
-    final created = await showDialog<bool>(
+  /// Creates a card, or edits [card]. Both sides are required: a card with
+  /// an empty side cannot be studied, and used to sit in the queue for good.
+  Future<void> _editCard(DueCard? card) async {
+    final front = TextEditingController(text: card?.front ?? '');
+    final back = TextEditingController(text: card?.back ?? '');
+    final saved = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('New card'),
+        title: Text(card == null ? 'New card' : 'Edit card'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -136,20 +153,52 @@ class _StudyPageState extends State<StudyPage> {
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Create'),
+          ListenableBuilder(
+            listenable: Listenable.merge([front, back]),
+            builder: (context, _) => FilledButton(
+              onPressed: front.text.trim().isEmpty || back.text.trim().isEmpty
+                  ? null
+                  : () => Navigator.of(context).pop(true),
+              child: Text(card == null ? 'Create' : 'Save'),
+            ),
           ),
         ],
       ),
     );
-    if (created ?? false) {
-      widget.cards.save(front: front.text.trim(), back: back.text.trim());
+    if (saved ?? false) {
+      widget.cards.save(
+          id: card?.cardId, front: front.text.trim(), back: back.text.trim());
       if (mounted) {
         setState(() {});
       }
     }
     front.dispose();
     back.dispose();
+  }
+
+  Future<void> _deleteCard(DueCard card) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete card?'),
+        content: Text('"${card.front}" is removed on every device.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed ?? false) {
+      widget.cards.delete(card.cardId);
+      if (mounted) {
+        setState(() {});
+      }
+    }
   }
 }

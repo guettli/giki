@@ -31,3 +31,11 @@ The rating is the user's own judgement of recall. A card whose answer was on
 screen before the question was read gets a rating that measures nothing, and
 the schedule is built on it. It happens on every sync while the study tab is
 open and another device studies too.
+
+## Found on the way: cards could not be edited or deleted
+
+Creating a card with both sides empty was accepted and synced, and nothing in
+the app could edit or delete a card: a blank or mistyped card sat in the
+study queue of every device for good. Create and Save now need both sides,
+and each card has "Edit card" and "Delete card" (asks first; it applies on
+every device). Editing keeps a card's page (`node_id`).

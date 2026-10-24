@@ -1043,6 +1043,43 @@ void main() {
     expect(find.text(next.back), findsNothing);
   });
 
+  // Cards could be created but never edited or deleted, and an empty one was
+  // accepted: a blank card sat in every device's queue for good.
+  testWidgets('a card can be edited and deleted, and needs both sides',
+      (tester) async {
+    final cards = CardRepository(db);
+    final id = cards.save(nodeId: 'some-page', front: 'Tpyo?', back: 'x');
+    cards.save(id: id, front: 'Typo?', back: 'fixed');
+    final row = db.raw.select(
+        'SELECT node_id, front, back FROM cards WHERE id = ?', [id]).first;
+    expect(row['front'], 'Typo?');
+    expect(row['node_id'], 'some-page',
+        reason: 'editing the text detached the card from its page');
+
+    final pendingBefore = db.pendingCount;
+    cards.delete(id);
+    expect(cards.due().where((c) => c.cardId == id), isEmpty);
+    expect(db.pendingCount, pendingBefore + 1,
+        reason: 'the deletion was not queued for sync');
+
+    await tester.pumpWidget(MaterialApp(
+      home: StudyPage(db: db, cards: cards),
+    ));
+    await tester.tap(find.byTooltip('New card'));
+    await tester.pumpAndSettle();
+    final create = find.widgetWithText(FilledButton, 'Create');
+    expect(tester.widget<FilledButton>(create).onPressed, isNull,
+        reason: 'an empty card could be created');
+    await tester.enterText(find.byType(TextField).at(0), 'Front only');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(create).onPressed, isNull);
+    await tester.enterText(find.byType(TextField).at(1), 'and back');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(create).onPressed, isNotNull);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('text fields have an accessible name', (tester) async {
     // Flutter renders InputDecoration's label as a sibling node, so without
     // explicit semantics the editable element reaches assistive technology
