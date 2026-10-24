@@ -106,3 +106,15 @@ CREATE TABLE IF NOT EXISTS api_sessions (
     expires_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS api_sessions_user ON api_sessions (user_id);
+
+-- Attachment bytes, keyed by their SHA-256 (lowercase hex). Kept in SQLite so
+-- the single database file stays the whole backup. Write-once: the server
+-- verifies the hash on upload, so a row can never hold other bytes than its
+-- key names, and a repeated upload is a no-op.
+CREATE TABLE IF NOT EXISTS blobs (
+    sha256     TEXT    PRIMARY KEY,
+    size       INTEGER NOT NULL,
+    data       BLOB    NOT NULL,
+    created_by TEXT    NOT NULL,
+    created_at TEXT    NOT NULL
+) WITHOUT ROWID;

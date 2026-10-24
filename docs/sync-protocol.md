@@ -135,3 +135,30 @@ them loses data quietly, which is why each has a test.
   query, and a decision about who may read what -- neither exists yet.
 * **No dead-letter queue.** A `rejected` mutation is reported once and dropped.
   It should be moved to a local table so it survives a reload.
+
+## Attachments
+
+An image or file is two things, synced two ways:
+
+* the **`attachments` row** (page, file name, MIME type, size, `sha256`) is
+  ordinary synced data: outbox, Last-Write-Wins, ChangeLog;
+* the **bytes** are a content-addressed blob, never in the ChangeLog:
+
+```
+PUT /api/v1/blobs/{sha256}    body: raw bytes      -> 200 {"sha256", "size"}
+GET /api/v1/blobs/{sha256}                         -> 200 raw bytes
+```
+
+The server checks that the bytes hash to the path (400 otherwise), caps a blob
+at 10 MiB (413), and stores it once; repeating an upload is a no-op. Every
+download is served as `application/octet-stream` with `Content-Disposition:
+attachment`, `nosniff` and a sandbox CSP: the type lives in the synced row, and
+user-uploaded HTML or SVG must never render on the app's origin.
+
+Order is what keeps the halves consistent. A sync round **uploads pending blobs
+first** and only then pushes the outbox, so no device ever receives a row whose
+bytes the server lacks. After applying deltas it **fetches missing blobs**,
+best effort: a page shows "not downloaded yet" and the next round retries.
+Blobs live in SQLite on both sides (`blobs` table), so the server's database
+file remains the whole backup. Removing an attachment tombstones the row; the
+blob stays, since another row may share it.

@@ -11,6 +11,7 @@
 //   tool/explore.mjs text                      the semantics tree, as text
 //   tool/explore.mjs click "Sign in with a passkey"
 //   tool/explore.mjs fill "Title" "Leitner"    type into a field by its label
+//   tool/explore.mjs upload "Attach files" a.png   answer a file chooser
 //   tool/explore.mjs key Enter                 a raw key
 //   tool/explore.mjs tap 640 450               a raw click, when all else fails
 //   tool/explore.mjs shot .explore/now.png     screenshot
@@ -28,7 +29,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -372,6 +373,40 @@ const commands = {
     })
     if (!result.ok) fail(result.reason)
     console.log(`clicked ${result.label} at (${result.x},${result.y})`)
+  },
+
+  // Clicks a button that opens the browser's file chooser and answers the
+  // chooser with local files, through CDP's file-chooser interception -- the
+  // dialog itself is native and cannot be driven any other way.
+  async upload(env, [label, ...files]) {
+    if (!label || !files.length) fail('usage: explore.mjs upload "<label>" <file>...')
+    const paths = files.map((file) => resolve(file))
+    const result = await withPage(env, async (browser) => {
+      await ensureHelpers(browser)
+      const target = await browser.eval(
+        `window.__gikiExplore.locate(${JSON.stringify(label)})`)
+      if (!target.ok) return target
+      await browser.send('Page.setInterceptFileChooserDialog', { enabled: true })
+      try {
+        await clickAt(browser, target.x, target.y)
+        let opened
+        for (let i = 0; i < 50 && !opened; i++) {
+          await new Promise((done) => setTimeout(done, 100))
+          opened = browser.events.find((event) => event.method === 'Page.fileChooserOpened')
+        }
+        if (!opened) return { ok: false, reason: `clicking ${label} opened no file chooser` }
+        await browser.send('DOM.setFileInputFiles', {
+          files: paths,
+          backendNodeId: opened.params.backendNodeId,
+        })
+      } finally {
+        await browser.send('Page.setInterceptFileChooserDialog', { enabled: false })
+      }
+      await new Promise((done) => setTimeout(done, 1000))
+      return target
+    })
+    if (!result.ok) fail(result.reason)
+    console.log(`uploaded ${paths.length} file(s) via ${result.label}`)
   },
 
   async fill(env, [label, ...rest]) {

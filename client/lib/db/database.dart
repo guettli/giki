@@ -37,6 +37,9 @@ class GikiDatabase {
           // outbox triggers, not SQLite's update hook. That is what lets an
           // open editor notice its page changed underneath it.
           nodesRevision.value++;
+        case 'attachments' || 'blobs':
+          // A file attached here or elsewhere, or its bytes arriving.
+          attachmentsRevision.value++;
       }
     });
   }
@@ -56,6 +59,10 @@ class GikiDatabase {
   /// Bumped whenever any row in `nodes` changes, locally or from a delta.
   /// Listeners re-read what they care about; the value itself means nothing.
   final ValueNotifier<int> nodesRevision = ValueNotifier<int>(0);
+
+  /// Bumped whenever an attachment or a blob changes, so a page's file list
+  /// follows uploads, deletions and bytes fetched in the background.
+  final ValueNotifier<int> attachmentsRevision = ValueNotifier<int>(0);
 
   /// Where the database lives inside the virtual file system. SimpleOpfsFileSystem
   /// can only persist a file called `/database`, so that name is not ours to
@@ -139,6 +146,7 @@ class GikiDatabase {
     unawaited(_outboxWatch.cancel());
     pendingChanges.dispose();
     nodesRevision.dispose();
+    attachmentsRevision.dispose();
     raw.close();
   }
 

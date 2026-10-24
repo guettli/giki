@@ -2,6 +2,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -113,6 +114,33 @@ class SyncApiClient {
       throw SyncApiException(response.statusCode, response.body);
     }
     return parseSyncResponse(response.body);
+  }
+
+  /// Uploads attachment bytes under their SHA-256. Idempotent.
+  Future<void> putBlob(String sha256, Uint8List bytes) async {
+    final response = await _http.put(
+      baseUrl.resolve('api/v1/blobs/$sha256'),
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Authorization': 'Bearer $token',
+      },
+      body: bytes,
+    );
+    if (response.statusCode != 200) {
+      throw SyncApiException(response.statusCode, response.body);
+    }
+  }
+
+  /// Downloads attachment bytes. The caller verifies the hash.
+  Future<Uint8List> getBlob(String sha256) async {
+    final response = await _http.get(
+      baseUrl.resolve('api/v1/blobs/$sha256'),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200) {
+      throw SyncApiException(response.statusCode, response.body);
+    }
+    return response.bodyBytes;
   }
 
   /// Releases the underlying HTTP client.

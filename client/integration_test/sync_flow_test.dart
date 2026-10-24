@@ -28,6 +28,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:giki/auth/webauthn.dart';
 import 'package:giki/auth/webauthn_json.dart';
+import 'package:giki/db/attachments.dart';
 import 'package:giki/db/clock.dart';
 import 'package:giki/db/database.dart';
 import 'package:giki/db/ids.dart';
@@ -786,6 +787,119 @@ void main() {
     expect(survivor['id'], srsStateId(cardId, db.userId),
         reason: 'the survivor is not the row every device agrees on');
     expect(survivor['box'], 4, reason: 'the newest schedule did not win');
+  });
+
+  // Attachments: the row syncs like any other, the bytes travel separately
+  // by hash. These phases pin the order that keeps the two consistent.
+  testWidgets('an attachment reaches the server, bytes before the row',
+      (_) async {
+    final attachments = AttachmentRepository(db);
+    final pageId = nodes.save(title: 'With a picture', body: 'see below');
+    final bytes = Uint8List.fromList(utf8.encode('pretend this is a PNG'));
+    final key = blobKey(bytes);
+    attachments.add(
+      nodeId: pageId,
+      filename: 'picture.png',
+      mimeType: guessMimeType('picture.png', ''),
+      bytes: bytes,
+    );
+    expect(attachments.pendingUploads(), [key]);
+
+    final report = await sync.syncOnce();
+    expect(report.uploaded, 1);
+    expect(report.rejected, isEmpty, reason: 'the server refused the row');
+    expect(attachments.pendingUploads(), isEmpty,
+        reason: 'the blob was not marked uploaded');
+
+    final served = await api.getBlob(key);
+    expect(served, bytes, reason: 'the server holds other bytes');
+    final listed = attachments.forNode(pageId);
+    expect(listed, hasLength(1));
+    expect(listed.single.mimeType, 'image/png');
+    expect(listed.single.isImage, isTrue);
+  });
+
+  testWidgets("another device's attachment arrives with its bytes", (_) async {
+    final attachments = AttachmentRepository(db);
+    final pageId = nodes.save(title: 'Shared file', body: '');
+    await sync.syncOnce();
+
+    // The other device uploads the blob first, then pushes the row.
+    final bytes = Uint8List.fromList(utf8.encode('a file from elsewhere'));
+    final key = blobKey(bytes);
+    final put = await http.put(
+      baseUrl.resolve('api/v1/blobs/$key'),
+      headers: {'Authorization': 'Bearer $token'},
+      body: bytes,
+    );
+    expect(put.statusCode, 200, reason: put.body);
+    final clock = formatClock(DateTime.now().toUtc());
+    const attachmentId = 'e2e-attachment-from-elsewhere';
+    await syncAsOtherDevice(mutations: [
+      {
+        'client_seq': 1,
+        'table': 'attachments',
+        'record_id': attachmentId,
+        'op': 'INSERT',
+        'updated_at': clock,
+        'payload': {
+          'id': attachmentId,
+          'node_id': pageId,
+          'sha256': key,
+          'filename': 'notes.txt',
+          'mime_type': 'text/plain',
+          'size': bytes.length,
+          'created_at': clock,
+          'created_by': claimedUser,
+          'updated_at': clock,
+          'updated_by': claimedUser,
+          'is_deleted': 0,
+        },
+      },
+    ]);
+
+    final report = await sync.syncUntilCaughtUp();
+    final listed = attachments.forNode(pageId);
+    expect(listed.map((a) => a.filename), ['notes.txt'],
+        reason: 'the attachment row did not arrive');
+    expect(listed.single.hasBytes, isTrue,
+        reason: 'the row arrived but its bytes were not fetched ($report)');
+    expect(attachments.bytes(key), bytes);
+
+    // Removing it is an ordinary tombstone, and the blob stays.
+    attachments.delete(attachmentId);
+    expect(attachments.forNode(pageId), isEmpty);
+    expect(attachments.bytes(key), isNotNull);
+    await sync.syncOnce();
+  });
+
+  testWidgets('fetched bytes that do not match their hash are dropped',
+      (_) async {
+    final attachments = AttachmentRepository(db);
+    final key = blobKey(utf8.encode('the real thing'));
+    expect(
+        attachments.storeFetched(
+            key, Uint8List.fromList(utf8.encode('an impostor'))),
+        isFalse);
+    expect(attachments.bytes(key), isNull);
+  });
+
+  testWidgets('an oversized file is refused before it reaches the outbox',
+      (_) async {
+    final attachments = AttachmentRepository(db);
+    final pageId = nodes.save(title: 'Too big', body: '');
+    final pendingBefore = db.pendingCount;
+    expect(
+      () => attachments.add(
+        nodeId: pageId,
+        filename: 'huge.bin',
+        mimeType: '',
+        bytes: Uint8List(maxAttachmentBytes + 1),
+      ),
+      throwsA(isA<AttachmentException>()),
+    );
+    expect(db.pendingCount, pendingBefore);
+    expect(attachments.pendingUploads(), isEmpty);
   });
 
   testWidgets('text fields have an accessible name', (tester) async {

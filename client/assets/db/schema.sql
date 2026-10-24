@@ -107,6 +107,27 @@ CREATE TABLE IF NOT EXISTS review_log (
 );
 CREATE INDEX IF NOT EXISTS review_log_card ON review_log (card_id, reviewed_at);
 
+-- A file or image attached to a node. Only the metadata syncs through the
+-- outbox and the ChangeLog; the bytes are a content-addressed blob, uploaded
+-- and fetched separately by `sha256` (lowercase hex). Content addressing makes
+-- the blob immutable, so it needs no Last-Write-Wins of its own: an "edited"
+-- file is a new attachment row pointing at a new hash.
+CREATE TABLE IF NOT EXISTS attachments (
+    id         TEXT    PRIMARY KEY,
+    node_id    TEXT    NOT NULL DEFAULT '',
+    sha256     TEXT    NOT NULL DEFAULT '',
+    filename   TEXT    NOT NULL DEFAULT '',
+    mime_type  TEXT    NOT NULL DEFAULT '',
+    size       INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL,
+    created_by TEXT    NOT NULL DEFAULT '',
+    updated_at TEXT    NOT NULL,
+    updated_by TEXT    NOT NULL DEFAULT '',
+    is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS attachments_node_id ON attachments (node_id) WHERE is_deleted = 0;
+CREATE INDEX IF NOT EXISTS attachments_sha256 ON attachments (sha256);
+
 -- ---------------------------------------------------------------------------
 -- Derived, NOT synced
 -- ---------------------------------------------------------------------------

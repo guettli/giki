@@ -183,4 +183,10 @@ if [ "${ceremonies:-0}" -lt 1 ]; then
     echo "the passkey phases did not reach the server: the test did not really run" >&2
     exit 1
 fi
-echo "ok: the server handled $syncs sync requests and $ceremonies passkey ceremonies"
+blobs=$(grep -c 'msg="blob stored"' "$workdir/server.log" || true)
+if [ "${blobs:-0}" -lt 1 ]; then
+    echo "the server stored no attachment blob: the attachment phases did not really run" >&2
+    exit 1
+fi
+
+echo "ok: the server handled $syncs sync requests, $ceremonies passkey ceremonies and $blobs blob uploads"
