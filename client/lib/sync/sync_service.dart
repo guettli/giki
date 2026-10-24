@@ -82,7 +82,6 @@ class SyncService {
 
   Timer? _timer;
   bool _running = false;
-  bool _fetching = false;
 
   /// Fires after every successful round trip, so the UI can refresh.
   final StreamController<SyncReport> _reports =
@@ -124,17 +123,28 @@ class SyncService {
   /// Downloads the blobs an open page asked for (GikiDatabase.wantBlobs).
   /// Returns how many arrived.
   ///
+  /// Concurrent callers share one run, and that run keeps going until no
+  /// wanted hash is left untried -- so a page that asks while a fetch is in
+  /// flight is served by it rather than by the next round.
+  ///
   /// A hash the server does not know is dropped from the wish list rather
   /// than asked for again on every round; opening the page asks again.
-  Future<int> fetchWantedBlobs() async {
-    if (_fetching) {
-      return 0;
-    }
-    _fetching = true;
+  Future<int> fetchWantedBlobs() =>
+      _fetch ??= _fetchWanted().whenComplete(() => _fetch = null);
+
+  Future<int>? _fetch;
+
+  Future<int> _fetchWanted() async {
     var fetched = 0;
-    try {
+    final tried = <String>{};
+    while (true) {
       _db.wantedBlobs.removeWhere((key) => _attachments.missing([key]).isEmpty);
-      for (final key in _db.wantedBlobs.toList()) {
+      final next = _db.wantedBlobs.difference(tried);
+      if (next.isEmpty) {
+        break;
+      }
+      for (final key in next) {
+        tried.add(key);
         try {
           if (_attachments.storeFetched(key, await _api.getBlob(key))) {
             fetched++;
@@ -149,16 +159,17 @@ class SyncService {
           _db.wantedBlobs.remove(key);
         } on Object {
           // Offline or a dropped connection: keep the wish, try next round.
-          break;
+          if (fetched > 0) {
+            await _db.flush();
+          }
+          return fetched;
         }
       }
-      if (fetched > 0) {
-        await _db.flush();
-      }
-      return fetched;
-    } finally {
-      _fetching = false;
     }
+    if (fetched > 0) {
+      await _db.flush();
+    }
+    return fetched;
   }
 
   /// Runs one push-and-pull round trip.
