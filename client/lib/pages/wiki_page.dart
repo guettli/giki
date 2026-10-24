@@ -108,6 +108,10 @@ class _NodeEditorState extends State<NodeEditor> {
   /// True when the stored page moved on while this editor had unsaved edits.
   bool _changedElsewhere = false;
 
+  /// True when another device deleted the page while this editor had it open.
+  /// The text stays, so the user can restore the page or copy what they typed.
+  bool _deletedElsewhere = false;
+
   bool get _dirty =>
       _title.text.trim() != _savedTitle.trim() || _body.text != _savedBody;
 
@@ -134,7 +138,17 @@ class _NodeEditorState extends State<NodeEditor> {
       return;
     }
     final stored = widget.nodes.byId(node.id);
-    if (stored == null || stored.updatedAt == _baseVersion) {
+    if (stored == null) {
+      if (!_deletedElsewhere) {
+        setState(() => _deletedElsewhere = true);
+      }
+      return;
+    }
+    if (_deletedElsewhere) {
+      // Restored elsewhere; from here on it is an ordinary newer version.
+      setState(() => _deletedElsewhere = false);
+    }
+    if (stored.updatedAt == _baseVersion) {
       return;
     }
     if (_dirty) {
@@ -154,6 +168,7 @@ class _NodeEditorState extends State<NodeEditor> {
     _savedTitle = node.title;
     _savedBody = node.body;
     _changedElsewhere = false;
+    _deletedElsewhere = false;
   }
 
   Future<void> _save() async {
@@ -163,7 +178,8 @@ class _NodeEditorState extends State<NodeEditor> {
     // and under Last-Write-Wins a fresh timestamp on unchanged text beats any
     // newer edit another device made -- which is how pressing Save on a page
     // you never touched used to erase someone else's writing.
-    if (existing != null && !_dirty) {
+    // A page deleted elsewhere is the exception: Save then offers a restore.
+    if (existing != null && !_dirty && widget.nodes.byId(existing.id) != null) {
       _snack('No changes to save.');
       return;
     }
@@ -172,7 +188,18 @@ class _NodeEditorState extends State<NodeEditor> {
     // asynchronous, and a delta may have landed a moment ago.
     if (existing != null) {
       final stored = widget.nodes.byId(existing.id);
-      if (stored != null && stored.updatedAt != _baseVersion) {
+      if (stored == null) {
+        // Deleted on another device. Saving would write into the tombstone:
+        // "saved", yet invisible on every device. Ask instead.
+        final restore = await _confirmRestore();
+        if (!mounted) {
+          return;
+        }
+        if (!restore) {
+          Navigator.of(context).pop();
+          return;
+        }
+      } else if (stored.updatedAt != _baseVersion) {
         final overwrite = await _confirmOverwrite();
         if (!mounted) {
           return;
@@ -195,6 +222,7 @@ class _NodeEditorState extends State<NodeEditor> {
       _savedTitle = _title.text;
       _savedBody = _body.text;
       _changedElsewhere = false;
+      _deletedElsewhere = false;
     });
     _snack('Saved locally. It will sync in the background.');
   }
@@ -216,6 +244,30 @@ class _NodeEditorState extends State<NodeEditor> {
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Overwrite with mine'),
+          ),
+        ],
+      ),
+    );
+    return choice ?? false;
+  }
+
+  Future<bool> _confirmRestore() async {
+    final choice = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Deleted on another device'),
+        content: const Text(
+          'This page was deleted somewhere else after you opened it. '
+          'Saving restores it, with your text, on every device.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Discard my text'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Restore with my text'),
           ),
         ],
       ),
@@ -256,7 +308,20 @@ class _NodeEditorState extends State<NodeEditor> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_changedElsewhere)
+          if (_deletedElsewhere)
+            MaterialBanner(
+              content: const Text(
+                'This page was deleted on another device. Your text is still '
+                'here; saving restores the page.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            )
+          else if (_changedElsewhere)
             MaterialBanner(
               content: const Text(
                 'This page was changed on another device while you were '

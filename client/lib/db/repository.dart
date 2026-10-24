@@ -86,7 +86,8 @@ class NodeRepository {
     return rows.isEmpty ? null : _node(rows.first);
   }
 
-  /// Creates a node, or updates the one with [id].
+  /// Creates a node, or updates the one with [id] -- restoring it if it was
+  /// deleted, since saving text into a tombstone would hide it everywhere.
   ///
   /// Returns the node's id, so the caller can navigate to a page that was just
   /// created by following a dangling link.
@@ -101,7 +102,7 @@ class NodeRepository {
       'ON CONFLICT (id) DO UPDATE SET '
       '  title = excluded.title, title_key = excluded.title_key, '
       '  body = excluded.body, updated_at = excluded.updated_at, '
-      '  updated_by = excluded.updated_by',
+      '  updated_by = excluded.updated_by, is_deleted = 0',
       [nodeId, title, titleKey, body, now, _db.userId, now, _db.userId],
     );
     reindexLinks(_db.raw, nodeId);
