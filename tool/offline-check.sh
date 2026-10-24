@@ -45,9 +45,9 @@ home_screen() {
     return 1
 }
 
+trap '"$root/tool/explore.sh" stop >/dev/null 2>&1 || true' EXIT
 "$root/tool/explore.sh" stop >/dev/null 2>&1 || true
 "$root/tool/explore.sh" start
-trap '"$root/tool/explore.sh" stop >/dev/null 2>&1 || true' EXIT
 
 x open / >/dev/null
 home_screen 60 || { echo "the app did not start even online" >&2; exit 1; }
@@ -67,14 +67,18 @@ until_true 60 "(async () => {
 
 . "$state/session.env"
 kill "$(cat "$state/server.pid")"
-sleep 1
-if curl --silent --max-time 2 --output /dev/null "$GIKI_EXPLORE_URL/healthz"; then
-    echo "the server is still answering; the check would prove nothing" >&2
-    exit 1
-fi
+gone=10
+while curl --silent --max-time 2 --output /dev/null "$GIKI_EXPLORE_URL/healthz"; do
+    gone=$((gone - 1))
+    if [ "$gone" -eq 0 ]; then
+        echo "the server is still answering; the check would prove nothing" >&2
+        exit 1
+    fi
+    sleep 1
+done
 
 for path in / /some/deep/link; do
-    x open "$path" >/dev/null
+    x open "$path" >/dev/null || true
     if ! home_screen 30; then
         echo "offline, $path did not start the app" >&2
         x console >&2 || true

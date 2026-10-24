@@ -159,7 +159,7 @@ Flags worth knowing:
 tool/fetch-sqlite-wasm.sh      # downloads client/web/sqlite3.wasm (not checked in)
 cd client
 flutter pub get
-flutter run -d chrome          # or: flutter build web --release
+flutter run -d chrome          # or: flutter build web --release --no-web-resources-cdn
 ```
 
 Then open **Settings** in the app and enter the server URL, a bearer token and
