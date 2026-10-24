@@ -96,8 +96,14 @@ class _NodeEditorState extends State<NodeEditor> {
 
   /// The text as loaded or last saved, to tell "the user edited something"
   /// apart from "the user pressed Save".
-  late String _savedTitle = _title.text;
-  late String _savedBody = _body.text;
+  ///
+  /// Assigned in initState, deliberately not with a `late` initializer: those
+  /// run on first *access*, and the first access is in _dirty -- after the
+  /// user has typed. That captured the typed text as "saved", so editing an
+  /// existing page and pressing Save reported "No changes to save." and wrote
+  /// nothing, and an incoming change silently replaced unsaved typing.
+  late String _savedTitle;
+  late String _savedBody;
 
   /// True when the stored page moved on while this editor had unsaved edits.
   bool _changedElsewhere = false;
@@ -108,6 +114,8 @@ class _NodeEditorState extends State<NodeEditor> {
   @override
   void initState() {
     super.initState();
+    _savedTitle = _title.text;
+    _savedBody = _body.text;
     widget.db.nodesRevision.addListener(_onNodesChanged);
   }
 

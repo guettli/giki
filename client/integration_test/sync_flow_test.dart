@@ -515,6 +515,26 @@ void main() {
     expect(find.text('No changes to save.'), findsOneWidget);
   });
 
+  // The ordinary case, and the one an earlier version of the fix broke: the
+  // "unchanged" check captured the typed text as the saved text, so editing an
+  // existing page and pressing Save wrote nothing at all.
+  testWidgets('editing an existing page and saving writes it', (tester) async {
+    final id = nodes.save(title: 'Editable', body: 'before');
+    await sync.syncOnce();
+    final pendingBefore = db.pendingCount;
+
+    await openEditor(tester, id);
+    await tester.enterText(find.byType(TextField).at(1), 'after');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+
+    expect(nodes.byId(id)!.body, 'after', reason: 'the edit was not saved');
+    expect(db.pendingCount, pendingBefore + 1,
+        reason: 'the edit was not queued for sync');
+    expect(find.text('No changes to save.'), findsNothing);
+  });
+
   testWidgets('an open editor shows a newer version that arrives',
       (tester) async {
     final id = nodes.save(title: 'Shared', body: 'the version I opened');
