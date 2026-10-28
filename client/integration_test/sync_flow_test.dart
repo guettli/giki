@@ -1314,7 +1314,11 @@ void main() {
     expect(find.text('giki'), findsOneWidget);
     expect(find.text('Wiki'), findsOneWidget);
     expect(find.text('Study'), findsOneWidget);
-    // The page that survived the earlier phases is listed.
+    // The page that survived the earlier phases is there. Found through the
+    // search field: the list is built lazily, and the earlier phases have
+    // added enough pages to push it below the fold.
+    await tester.enterText(find.byType(TextField), 'Spaced Repetition');
+    await tester.pumpAndSettle();
     expect(find.text('Spaced Repetition'), findsWidgets);
   });
 }
