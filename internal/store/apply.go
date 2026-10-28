@@ -370,8 +370,10 @@ func (s *Store) Changes(ctx context.Context, afterSeq int64, excludeDevice strin
 	return changes, hasMore, nil
 }
 
-// RecordHistory returns the full audit trail of one record, oldest first:
-// who changed it, when, and to what.
+// RecordHistory returns the audit trail of one record, oldest first: who
+// changed it, when, and to what. With more than limit entries it returns the
+// newest limit of them -- the recent past is what a reader of a long-lived
+// page is after, and the oldest 200 versions of it are not.
 func (s *Store) RecordHistory(ctx context.Context, table, recordID string, limit int) ([]Change, error) {
 	if _, ok := LookupTable(table); !ok {
 		return nil, fmt.Errorf("%w: unknown table %q", ErrRejected, table)
@@ -380,12 +382,14 @@ func (s *Store) RecordHistory(ctx context.Context, table, recordID string, limit
 		limit = 200
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT seq, table_name, record_id, op, payload, record_updated_at,
-		       actor_user_id, origin_device_id, applied_at
-		FROM change_log
-		WHERE table_name = ? AND record_id = ?
-		ORDER BY seq
-		LIMIT ?`, table, recordID, limit)
+		SELECT * FROM (
+			SELECT seq, table_name, record_id, op, payload, record_updated_at,
+			       actor_user_id, origin_device_id, applied_at
+			FROM change_log
+			WHERE table_name = ? AND record_id = ?
+			ORDER BY seq DESC
+			LIMIT ?
+		) ORDER BY seq`, table, recordID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("read history: %w", err)
 	}

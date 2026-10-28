@@ -51,6 +51,40 @@ class SyncResponse {
   final String serverTime;
 }
 
+/// One entry of a record's audit trail on the server.
+class HistoryEntry {
+  const HistoryEntry({
+    required this.seq,
+    required this.op,
+    required this.payload,
+    required this.actorUserId,
+    required this.originDeviceId,
+    required this.appliedAt,
+  });
+
+  final int seq;
+
+  /// 'INSERT', 'UPDATE' or 'DELETE'.
+  final String op;
+
+  /// The row as it was written. A DELETE carries only the id.
+  final Map<String, Object?> payload;
+
+  /// Who made the change, from the server's authenticated session.
+  final String actorUserId;
+  final String originDeviceId;
+
+  /// When the server accepted it (server clock, RFC 3339 UTC).
+  final String appliedAt;
+
+  /// True when this change removed the record: a DELETE, or an update that
+  /// tombstoned it.
+  bool get deletes =>
+      op == 'DELETE' ||
+      payload['is_deleted'] == 1 ||
+      payload['is_deleted'] == true;
+}
+
 /// Raised when the server answers with a non-2xx status.
 class SyncApiException implements Exception {
   SyncApiException(this.statusCode, this.message);
@@ -114,6 +148,21 @@ class SyncApiClient {
       throw SyncApiException(response.statusCode, response.body);
     }
     return parseSyncResponse(response.body);
+  }
+
+  /// Reads the audit trail of one record, newest first.
+  Future<List<HistoryEntry>> history(String table, String recordId) async {
+    final response = await _http.get(
+      baseUrl.resolveUri(Uri(
+        path: 'api/v1/history',
+        queryParameters: {'table': table, 'record_id': recordId},
+      )),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode != 200) {
+      throw SyncApiException(response.statusCode, response.body);
+    }
+    return parseHistoryResponse(response.body);
   }
 
   /// Uploads attachment bytes under their SHA-256. Idempotent.
@@ -186,4 +235,23 @@ SyncResponse parseSyncResponse(String body) {
           ),
     ],
   );
+}
+
+/// Decodes a history response body, newest entry first. The server sends the
+/// trail oldest first, which is the right order for an audit log and the
+/// wrong one for a person looking for yesterday's version.
+List<HistoryEntry> parseHistoryResponse(String body) {
+  final decoded = jsonDecode(body) as Map<String, Object?>;
+  return [
+    for (final raw in (decoded['history'] as List<Object?>? ?? const []))
+      if (raw is Map<String, Object?>)
+        HistoryEntry(
+          seq: raw['seq']! as int,
+          op: raw['op']! as String,
+          payload: (raw['payload'] as Map<String, Object?>?) ?? const {},
+          actorUserId: (raw['actor_user_id'] as String?) ?? '',
+          originDeviceId: (raw['origin_device_id'] as String?) ?? '',
+          appliedAt: (raw['applied_at'] as String?) ?? '',
+        ),
+  ].reversed.toList();
 }
