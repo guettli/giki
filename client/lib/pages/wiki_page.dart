@@ -118,11 +118,13 @@ class _WikiPageState extends State<WikiPage> {
         final hit = hits[index];
         return ListTile(
           title: Text(hit.title.isEmpty ? '(untitled)' : hit.title),
-          subtitle: Text.rich(
-            highlightSnippet(hit.snippet, Theme.of(context)),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+          subtitle: hit.snippet.trim().isEmpty
+              ? null
+              : Text.rich(
+                  highlightSnippet(hit.snippet, Theme.of(context)),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
           onTap: () => _edit(hit.id),
         );
       },

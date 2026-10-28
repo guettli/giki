@@ -1237,10 +1237,15 @@ void main() {
     db.raw.execute("INSERT INTO nodes_fts (nodes_fts) VALUES ('delete-all')");
     db.raw.execute(
         'DELETE FROM sync_meta WHERE key = ?', [searchIndexVersionKey]);
-    expect(titles('zettel'), isEmpty);
-    expect(ensureSearchIndex(db.raw), isTrue);
-    expect(ensureSearchIndex(db.raw), isFalse);
-    expect(titles('zettel'), ['Zettelkasten']);
+    try {
+      expect(titles('zettel'), isEmpty);
+      expect(ensureSearchIndex(db.raw), isTrue);
+      expect(ensureSearchIndex(db.raw), isFalse);
+      expect(titles('zettel'), ['Zettelkasten']);
+    } finally {
+      // The index is shared with every later phase: never leave it empty.
+      db.raw.execute("INSERT INTO nodes_fts (nodes_fts) VALUES ('rebuild')");
+    }
 
     db.applyDeltas([arriving(deleted: 1)], db.cursor);
     expect(titles('consonant'), isEmpty,

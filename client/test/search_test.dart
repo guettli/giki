@@ -13,7 +13,11 @@ void main() {
     // Unquoted, these would be operators, a column filter or a syntax error.
     expect(ftsQuery('title: a AND b'), '"title"* "a"* "AND"* "b"*');
     expect(ftsQuery('"unbalanced'), '"unbalanced"*');
-    expect(ftsQuery('NEAR(a b)'), '"NEAR"* "a"* "b"*');
+    expect(ftsQuery('NEAR(a b)'), '"NEAR a"* "b"*');
+  });
+
+  test("a word the tokenizer splits stays one phrase", () {
+    expect(ftsQuery("don't panic"), '"don t"* "panic"*');
   });
 
   test('nothing to search for', () {

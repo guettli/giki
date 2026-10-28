@@ -30,7 +30,8 @@ class SearchHit {
   final String id;
   final String title;
 
-  /// A short excerpt around the match, with every matched term wrapped in
+  /// A short excerpt of the body around the match -- or its start, when only
+  /// the title matched -- with every matched term wrapped in
   /// [matchStart] and [matchEnd]. Private-use characters rather than markup,
   /// so a page that contains brackets or tags cannot fake a highlight.
   final String snippet;
@@ -67,19 +68,24 @@ bool ensureSearchIndex(CommonDatabase db) {
 /// Turns what the user typed into an FTS5 query, or null when there is
 /// nothing to search for.
 ///
-/// Every word becomes a quoted prefix term, and all of them must match: typing
-/// "spac rep" finds "Spaced Repetition". Quoting means FTS5 syntax in the
-/// input -- AND, NEAR, a stray quote or a column filter -- is searched for as
-/// text instead of failing with a syntax error.
+/// Every word becomes a quoted prefix phrase, and all of them must match:
+/// typing "spac rep" finds "Spaced Repetition". Quoting means FTS5 syntax in
+/// the input -- AND, NEAR, a stray quote or a column filter -- is searched for
+/// as text instead of failing with a syntax error. A word the tokenizer splits,
+/// like "don't", stays one phrase ("don t"), rather than a bare "t" prefix that
+/// would match nearly every page.
 String? ftsQuery(String input) {
-  final words = input
-      .split(RegExp(r'[^\p{L}\p{N}]+', unicode: true))
-      .where((word) => word.isNotEmpty)
-      .toList();
-  if (words.isEmpty) {
-    return null;
+  final phrases = <String>[];
+  for (final word in input.split(RegExp(r'\s+'))) {
+    final tokens = word
+        .split(RegExp(r'[^\p{L}\p{N}]+', unicode: true))
+        .where((token) => token.isNotEmpty);
+    if (tokens.isNotEmpty) {
+      // Tokens hold only letters and digits, so no quote needs escaping.
+      phrases.add('"${tokens.join(' ')}"*');
+    }
   }
-  return words.map((word) => '"${word.replaceAll('"', '""')}"*').join(' ');
+  return phrases.isEmpty ? null : phrases.join(' ');
 }
 
 /// Finds live pages matching [input], best match first. A match in the title
@@ -91,7 +97,9 @@ List<SearchHit> searchNodes(CommonDatabase db, String input, {int limit = 50}) {
   }
   final rows = db.select(
     'SELECT n.id, n.title, '
-    "snippet(nodes_fts, -1, '$matchStart', '$matchEnd', '…', 12) AS snippet "
+    // Always the body: a title-only match would otherwise repeat the title as
+    // its own snippet and show nothing of the page.
+    "snippet(nodes_fts, 1, '$matchStart', '$matchEnd', '…', 12) AS snippet "
     'FROM nodes_fts JOIN nodes n ON n.rowid = nodes_fts.rowid '
     'WHERE nodes_fts MATCH ? AND n.is_deleted = 0 '
     'ORDER BY bm25(nodes_fts, 5.0, 1.0) '
