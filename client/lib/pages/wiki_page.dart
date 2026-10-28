@@ -241,7 +241,11 @@ class _NodeEditorState extends State<NodeEditor> {
       return null;
     }
     for (final attachment in _attachments.forNode(nodeId)) {
-      if (attachment.filename == filename && attachment.hasBytes) {
+      // The same allowlist as the attachments section: SVG and other
+      // formats are offered for download, never rendered.
+      if (attachment.filename == filename &&
+          attachment.isImage &&
+          attachment.hasBytes) {
         final cached = _images[attachment.sha256];
         if (cached != null) {
           return cached;
@@ -390,6 +394,30 @@ class _NodeEditorState extends State<NodeEditor> {
     return choice ?? false;
   }
 
+  Future<bool> _confirmLeave() async {
+    final choice = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Leave without saving?'),
+        content: const Text(
+          'This page has changes that are not saved. Following the link '
+          'discards them.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Stay'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Discard and follow'),
+          ),
+        ],
+      ),
+    );
+    return choice ?? false;
+  }
+
   Future<bool> _confirmReplaceTyping() async {
     final choice = await showDialog<bool>(
       context: context,
@@ -522,6 +550,15 @@ class _NodeEditorState extends State<NodeEditor> {
                   },
                   child: const Text('Discard mine, show theirs'),
                 ),
+              ],
+            ),
+          if (_reading && _dirty)
+            MaterialBanner(
+              content: const Text(
+                'This shows unsaved changes. Save to keep them.',
+              ),
+              actions: [
+                TextButton(onPressed: _save, child: const Text('Save')),
               ],
             ),
           if (_reading)
@@ -657,7 +694,18 @@ class _NodeEditorState extends State<NodeEditor> {
   }
 
   /// Follows a [[link]], creating the target page if it does not exist yet.
-  void _follow(String titleKey) {
+  Future<void> _follow(String titleKey) async {
+    if (normalizeTitle(titleKey).isEmpty) {
+      return;
+    }
+    // Leaving replaces this editor: unsaved typing would be gone without a
+    // word, and in Read mode it does not even look unsaved.
+    if (_dirty && !await _confirmLeave()) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
     final existing = widget.nodes.byTitle(titleKey);
     final id = existing?.id ?? widget.nodes.save(title: titleKey, body: '');
     Navigator.of(context).pushReplacement(MaterialPageRoute<void>(

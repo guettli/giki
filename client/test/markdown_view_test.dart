@@ -17,6 +17,14 @@ void main() {
     expect(render('`[[Not A Link]]`'), isNot(contains('<a')));
   });
 
+  test('a link with no target is text, not a link to an empty page', () {
+    expect(render('[[ |label]]'), isNot(contains('<a')));
+  });
+
+  test('a malformed escape is no page link', () {
+    expect(wikiLinkTarget('giki-page:%FF'), isNull);
+  });
+
   test('a page link round-trips its title', () {
     expect(
         wikiLinkTarget('giki-page:Spaced%20Repetition'), 'Spaced Repetition');
@@ -73,5 +81,22 @@ void main() {
       ),
     ));
     expect(find.textContaining('This page is empty'), findsOneWidget);
+  });
+
+  testWidgets('a malformed image path shows a placeholder, not an error',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PageMarkdown(
+          body: 'before\n\n![x](%FF.png)\n\nafter',
+          imageBytes: (_) => null,
+          onWikiLink: (_) {},
+          onExternalLink: (_) {},
+        ),
+      ),
+    ));
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('Image not available: x'), findsOneWidget);
+    expect(find.textContaining('after'), findsOneWidget);
   });
 }

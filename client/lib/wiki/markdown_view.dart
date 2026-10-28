@@ -13,9 +13,9 @@ const String wikiLinkScheme = 'giki-page';
 
 /// Turns `[[Title]]` and `[[Title|label]]` into links to [wikiLinkScheme].
 ///
-/// The same shape as the link index's pattern (lib/wiki/wikilink.dart), so
-/// what renders as a link is exactly what shows up in backlinks. It is an
-/// inline syntax, so a `[[link]]` inside a code span or block stays text.
+/// The same shape as the link index's pattern (lib/wiki/wikilink.dart). It is
+/// an inline syntax, so a `[[link]]` inside a code span or block stays text --
+/// unlike the index, which still counts it as a backlink.
 class WikiLinkSyntax extends md.InlineSyntax {
   WikiLinkSyntax() : super(r'\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]');
 
@@ -23,6 +23,12 @@ class WikiLinkSyntax extends md.InlineSyntax {
   bool onMatch(md.InlineParser parser, Match match) {
     final target = match[1]!.trim();
     final label = (match[2] ?? '').trim();
+    if (target.isEmpty) {
+      // `[[ |label]]` points nowhere; following it would create an untitled
+      // page on every tap.
+      parser.addNode(md.Text(match[0]!));
+      return true;
+    }
     final link = md.Element.text('a', label.isEmpty ? target : label)
       ..attributes['href'] = '$wikiLinkScheme:${Uri.encodeComponent(target)}';
     parser.addNode(link);
@@ -36,7 +42,19 @@ String? wikiLinkTarget(String? href) {
   if (href == null || !href.startsWith('$wikiLinkScheme:')) {
     return null;
   }
-  return Uri.decodeComponent(href.substring(wikiLinkScheme.length + 1));
+  return _decode(href.substring(wikiLinkScheme.length + 1));
+}
+
+/// Percent-decodes [text], or returns null when it is not valid. Page text
+/// comes from every device: `%FF` must not take a page down for everyone.
+String? _decode(String text) {
+  try {
+    return Uri.decodeComponent(text);
+  } on ArgumentError {
+    return null;
+  } on FormatException {
+    return null;
+  }
 }
 
 /// Links that may leave the app. Anything else -- javascript:, data:, a
@@ -110,7 +128,8 @@ class PageMarkdown extends StatelessWidget {
       return _placeholder(
           context, Icons.public_off, 'Remote image not loaded: $label');
     }
-    final bytes = imageBytes(Uri.decodeComponent(uri.path));
+    final filename = _decode(uri.path);
+    final bytes = filename == null ? null : imageBytes(filename);
     if (bytes == null) {
       return _placeholder(
           context, Icons.image_outlined, 'Image not available: $label');
