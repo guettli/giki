@@ -100,23 +100,40 @@ class NodeRepository {
     final nodeId = id ?? newId();
     final now = nowClock();
     final titleKey = normalizeTitle(title);
-    _db.raw.execute(
-      'INSERT INTO nodes (id, title, title_key, body, created_at, created_by, '
-      '                   updated_at, updated_by, is_deleted) '
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) '
-      'ON CONFLICT (id) DO UPDATE SET '
-      '  title = excluded.title, title_key = excluded.title_key, '
-      '  body = excluded.body, updated_at = excluded.updated_at, '
-      '  updated_by = excluded.updated_by, is_deleted = 0',
-      [nodeId, title, titleKey, body, now, _db.userId, now, _db.userId],
-    );
-    reindexLinks(_db.raw, nodeId);
-    syncPageCards(_db.raw,
-        nodeId: nodeId,
-        body: body,
-        pageDeleted: false,
-        userId: _db.userId,
-        now: now);
+    // The page, its links and its cards in one transaction: a tab closed
+    // half-way must not leave a page in the outbox without the cards its
+    // text promises -- other devices never derive them themselves.
+    _db.raw.execute('BEGIN IMMEDIATE');
+    try {
+      // What the page said before, to tell which card lines this save
+      // touched. A deleted page had none: restoring it writes them all.
+      final previous = _db.raw.select(
+        'SELECT body FROM nodes WHERE id = ? AND is_deleted = 0',
+        [nodeId],
+      );
+      final before = previous.isEmpty ? '' : previous.first['body'] as String;
+      _db.raw.execute(
+        'INSERT INTO nodes (id, title, title_key, body, created_at, created_by, '
+        '                   updated_at, updated_by, is_deleted) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) '
+        'ON CONFLICT (id) DO UPDATE SET '
+        '  title = excluded.title, title_key = excluded.title_key, '
+        '  body = excluded.body, updated_at = excluded.updated_at, '
+        '  updated_by = excluded.updated_by, is_deleted = 0',
+        [nodeId, title, titleKey, body, now, _db.userId, now, _db.userId],
+      );
+      reindexLinks(_db.raw, nodeId);
+      syncPageCards(_db.raw,
+          nodeId: nodeId,
+          before: before,
+          after: body,
+          userId: _db.userId,
+          now: now);
+      _db.raw.execute('COMMIT');
+    } on Object {
+      _db.raw.execute('ROLLBACK');
+      rethrow;
+    }
     return nodeId;
   }
 
@@ -127,13 +144,30 @@ class NodeRepository {
   /// with it; restoring the page writes them again.
   void delete(String id) {
     final now = nowClock();
-    _db.raw.execute(
-      'UPDATE nodes SET is_deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?',
-      [now, _db.userId, id],
-    );
-    reindexLinks(_db.raw, id);
-    syncPageCards(_db.raw,
-        nodeId: id, body: '', pageDeleted: true, userId: _db.userId, now: now);
+    _db.raw.execute('BEGIN IMMEDIATE');
+    try {
+      final previous = _db.raw.select(
+        'SELECT body FROM nodes WHERE id = ? AND is_deleted = 0',
+        [id],
+      );
+      _db.raw.execute(
+        'UPDATE nodes SET is_deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?',
+        [now, _db.userId, id],
+      );
+      reindexLinks(_db.raw, id);
+      if (previous.isNotEmpty) {
+        syncPageCards(_db.raw,
+            nodeId: id,
+            before: previous.first['body'] as String,
+            after: '',
+            userId: _db.userId,
+            now: now);
+      }
+      _db.raw.execute('COMMIT');
+    } on Object {
+      _db.raw.execute('ROLLBACK');
+      rethrow;
+    }
   }
 
   /// The nodes that link to [titleKey] -- the passive context that makes a

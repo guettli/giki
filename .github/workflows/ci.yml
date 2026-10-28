@@ -108,7 +108,8 @@ jobs:
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed .
       - run: flutter analyze
-      - run: flutter test
+      # test_vm/ needs the native SQLite, so it runs on the VM only.
+      - run: flutter test test test_vm
       # Again, in the browser. giki only ever runs on the web, and the web's
       # numbers are not the VM's: ints are doubles, and bitwise operators work
       # on 32 bits. The UUIDv7 encoder passed on the VM for weeks while every id

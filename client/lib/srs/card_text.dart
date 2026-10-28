@@ -20,13 +20,14 @@ class CardLine {
 }
 
 final RegExp _listMarker = RegExp(r'^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?');
-final RegExp _fence = RegExp(r'^(`{3,}|~{3,})');
+final RegExp _fence = RegExp(r'^(`{3,}|~{3,})(.*)$');
 
 /// The cards written in [body]: every line of the form `front :: back`.
 ///
-/// A list marker in front is ignored, so a list of questions works. Lines in
-/// fenced code blocks are not cards -- code can contain `::` (C++, Haskell)
-/// without meaning it. Both sides must be non-empty, and a question that
+/// A list marker in front is ignored, so a list of questions works. Code is
+/// not cards -- C++ and Haskell use `::` without meaning it: lines in fenced
+/// or indented code blocks are skipped, and so is a line whose separator sits
+/// inside an inline `code span`. Both sides must be non-empty, and a question that
 /// appears twice counts once, first one wins: the question is what
 /// identifies a card (see [cardKey]).
 List<CardLine> parseCardLines(String body) {
@@ -37,17 +38,24 @@ List<CardLine> parseCardLines(String body) {
     final line = raw.trim();
     final opening = _fence.firstMatch(line);
     if (fence != null) {
-      if (opening != null && line.startsWith(fence)) {
+      // CommonMark: the closing fence uses the same character, is at least
+      // as long as the opening one, and has no info string.
+      if (opening != null &&
+          opening.group(1)!.startsWith(fence) &&
+          opening.group(2)!.trim().isEmpty) {
         fence = null;
       }
       continue;
     }
     if (opening != null) {
-      fence = opening.group(1)![0] * 3;
+      fence = opening.group(1);
       continue;
     }
+    if (raw.startsWith('    ') || raw.startsWith('\t')) {
+      continue; // an indented code block
+    }
     final at = line.indexOf(' :: ');
-    if (at < 0) {
+    if (at < 0 || '`'.allMatches(line.substring(0, at)).length.isOdd) {
       continue;
     }
     final front = line.substring(0, at).replaceFirst(_listMarker, '').trim();

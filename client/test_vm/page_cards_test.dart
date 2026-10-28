@@ -1,3 +1,9 @@
+// Runs on the VM only: it uses the native SQLite to apply the real schema,
+// which cannot even be compiled for the browser. That is why it lives outside
+// test/, which CI also runs in Chrome.
+@TestOn('vm')
+library;
+
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -25,10 +31,13 @@ void main() {
       );
     });
 
-    test('code blocks are not cards', () {
+    test('code is not cards', () {
       expect(
         parseCardLines('```cpp\nstd :: vector\n```\n'
             '~~~\nmain :: IO ()\n~~~\n'
+            '````\n```dart\ninner :: fence\n```\nstill :: code\n````\n'
+            '    indented :: code\n'
+            'use `std :: vector` here\n'
             'after :: fence'),
         const [CardLine('after', 'fence')],
       );
@@ -57,14 +66,20 @@ void main() {
     });
     tearDown(() => db.close());
 
-    PageCardChanges sync(String body,
-            {bool deleted = false, String now = '2026-10-28T10:00:00.000Z'}) =>
-        syncPageCards(db,
-            nodeId: 'page',
-            body: body,
-            pageDeleted: deleted,
-            userId: 'alice',
-            now: now);
+    var page = '';
+    PageCardChanges edit(String after,
+        {String now = '2026-10-28T10:00:00.000Z'}) {
+      final changes = syncPageCards(db,
+          nodeId: 'page',
+          before: page,
+          after: after,
+          userId: 'alice',
+          now: now);
+      page = after;
+      return changes;
+    }
+
+    setUp(() => page = '');
 
     List<String> live() => [
           for (final row in db.select(
@@ -76,11 +91,11 @@ void main() {
         db.select('SELECT count(*) AS n FROM sync_outbox').first['n'] as int;
 
     test('lines create, change, and remove cards', () {
-      var changes = sync('A :: 1\nB :: 2');
+      var changes = edit('A :: 1\nB :: 2');
       expect((changes.created, changes.updated, changes.deleted), (2, 0, 0));
       expect(live(), ['A :: 1', 'B :: 2']);
 
-      changes = sync('a :: one\nC :: 3');
+      changes = edit('a :: one\nC :: 3');
       expect((changes.created, changes.updated, changes.deleted), (1, 1, 1));
       expect(live(), ['C :: 3', 'a :: one']);
       // Same question, so the same card -- and the same review schedule.
@@ -90,11 +105,39 @@ void main() {
       );
     });
 
-    test('saving unchanged text writes nothing', () {
-      sync('A :: 1');
+    test('saving unchanged lines writes nothing', () {
+      edit('A :: 1');
       final before = outbox();
-      expect(sync('A :: 1', now: '2026-10-28T11:00:00.000Z').isEmpty, isTrue);
+      expect(edit('A :: 1\n\nmore prose').isEmpty, isTrue);
       expect(outbox(), before);
+    });
+
+    test('a card edited or deleted elsewhere stays so until its line changes',
+        () {
+      edit('A :: 1\nB :: 2');
+      final a = pageCardId('page', 'a');
+      final b = pageCardId('page', 'b');
+      db.execute(
+          "UPDATE cards SET back = 'fixed on the Study page' WHERE id = ?",
+          [a]);
+      db.execute('UPDATE cards SET is_deleted = 1 WHERE id = ?', [b]);
+
+      // An unrelated edit of the page.
+      edit('A :: 1\nB :: 2\n\nA new paragraph.');
+      expect(live(), ['A :: fixed on the Study page']);
+
+      // Editing a line is a decision about that card.
+      edit('A :: 1\nB :: two\n\nA new paragraph.');
+      expect(live(), ['A :: fixed on the Study page', 'B :: two']);
+    });
+
+    test('a card whose question was edited elsewhere still goes with its line',
+        () {
+      edit('A :: 1');
+      db.execute("UPDATE cards SET front = 'Rephrased' WHERE id = ?",
+          [pageCardId('page', 'a')]);
+      expect(edit('').deleted, 1);
+      expect(live(), isEmpty);
     });
 
     test('a hand-made card on the page is left alone', () {
@@ -102,16 +145,16 @@ void main() {
         "INSERT INTO cards (id, node_id, front, back, created_at, updated_at) "
         "VALUES ('random-id', 'page', 'Manual', 'card', 'x', 'x')",
       );
-      sync('A :: 1');
-      sync('');
+      edit('A :: 1');
+      edit('');
       expect(live(), ['Manual :: card']);
     });
 
     test('deleting the page deletes its cards; restoring brings them back', () {
-      sync('A :: 1');
-      expect(sync('A :: 1', deleted: true).deleted, 1);
+      edit('A :: 1');
+      expect(edit('').deleted, 1);
       expect(live(), isEmpty);
-      expect(sync('A :: 1').created, 1);
+      expect(edit('A :: 1').created, 1);
       expect(live(), ['A :: 1']);
     });
   });
