@@ -20,7 +20,7 @@ func WebUI(dir string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := filepath.Clean(strings.TrimPrefix(r.URL.Path, "/"))
 		// http.Dir already refuses to escape dir; this only decides whether to
-		// serve a file or fall back to the shell.
+		// serve the shell, a file, or a 404.
 		// index.html is served directly rather than through the file server,
 		// which would redirect /index.html to ./ and cost a round trip.
 		if clean == "." || clean == "/" || clean == "index.html" {

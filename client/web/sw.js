@@ -26,8 +26,9 @@ function cacheable(url) {
   );
 }
 
-// One copy of the shell, whatever URL it was loaded from: the server answers
-// every page address with index.html.
+// One copy of the shell, whatever URL it was loaded from. Online the server
+// answers 404 for an address the app does not have; offline there is nobody
+// to ask, so every address starts the app.
 const SHELL = new URL('./', self.location).href;
 
 // How long the network gets before a cached copy answers instead. Only the
@@ -42,8 +43,8 @@ const SLOW_NETWORK_MS = 30000;
 let slowUntil = 0;
 
 // Only a complete, genuine copy of the file: a 206 cannot be stored, and an
-// HTML page stored as main.dart.js -- the server's shell for an unknown path,
-// a captive portal's login page -- would break the next offline start.
+// HTML page stored as main.dart.js -- a 404 page, a captive portal's login
+// page -- would break the next offline start.
 async function keep(key, response, navigate) {
   const html = (response.headers.get('Content-Type') || '').startsWith('text/html');
   if (response.status !== 200 || response.redirected || html !== navigate) {
@@ -80,9 +81,11 @@ async function respond(event) {
   let timer;
   const fresh = await Promise.race([
     // A 404 for a page is the server's real answer (an address that does not
-    // exist), not an outage: show it rather than the cached app.
+    // exist), not an outage: show it rather than the cached app. Only a 404:
+    // a captive portal's redirect or an auth proxy's 401/403 must still fall
+    // back to the app, which works without them.
     network.then(
-      (response) => (response.ok || (navigate && response.status < 500) ? response : null),
+      (response) => (response.ok || (navigate && response.status === 404) ? response : null),
       () => null,
     ),
     new Promise((resolve) => {
