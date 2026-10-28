@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 
 import '../db/database.dart';
 import '../db/repository.dart';
+import '../sync/api_client.dart';
 import '../wiki/wikilink.dart';
 import 'attachments_section.dart';
+import 'history_page.dart';
 
 /// Lists the most recently edited nodes.
 class WikiPage extends StatefulWidget {
@@ -252,6 +254,30 @@ class _NodeEditorState extends State<NodeEditor> {
     return choice ?? false;
   }
 
+  Future<bool> _confirmReplaceTyping() async {
+    final choice = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Replace unsaved changes?'),
+        content: const Text(
+          'You have changes that are not saved yet. Loading the earlier '
+          'version replaces them.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep my changes'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Load earlier version'),
+          ),
+        ],
+      ),
+    );
+    return choice ?? false;
+  }
+
   Future<bool> _confirmRestore() async {
     final choice = await showDialog<bool>(
       context: context,
@@ -293,6 +319,12 @@ class _NodeEditorState extends State<NodeEditor> {
       appBar: AppBar(
         title: Text(node == null ? 'New page' : 'Edit page'),
         actions: [
+          if (node != null)
+            IconButton(
+              tooltip: 'History',
+              icon: const Icon(Icons.history),
+              onPressed: () => _openHistory(node.id),
+            ),
           if (node != null)
             IconButton(
               tooltip: 'Delete',
@@ -417,6 +449,46 @@ class _NodeEditorState extends State<NodeEditor> {
         ],
       ),
     );
+  }
+
+  /// Shows the server's history of this page; a chosen version lands in the
+  /// editor, unsaved.
+  Future<void> _openHistory(String nodeId) async {
+    final url = Uri.tryParse(widget.db.meta(MetaKeys.serverUrl) ?? '');
+    final token = widget.db.meta(MetaKeys.token) ?? '';
+    if (url == null || !url.hasScheme || token.isEmpty) {
+      _snack('The history is kept by the server. Sign in under Settings to '
+          'see it.');
+      return;
+    }
+    final api = SyncApiClient(baseUrl: url, token: token);
+    final PageVersion? version;
+    try {
+      version = await Navigator.of(context).push<PageVersion>(
+        MaterialPageRoute(
+          builder: (_) => HistoryPage(
+            load: () => api.history('nodes', nodeId),
+            shown: PageVersion(title: _title.text, body: _body.text),
+          ),
+        ),
+      );
+    } finally {
+      api.close();
+    }
+    if (version == null || !mounted) {
+      return;
+    }
+    if (_dirty && !await _confirmReplaceTyping()) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _title.text = version!.title;
+      _body.text = version.body;
+    });
+    _snack('Earlier version loaded. Save to keep it.');
   }
 
   /// Follows a [[link]], creating the target page if it does not exist yet.

@@ -36,6 +36,7 @@ import 'package:giki/db/link_index.dart';
 import 'package:giki/db/srs_merge.dart';
 import 'package:giki/db/repository.dart';
 import 'package:giki/main.dart';
+import 'package:giki/pages/history_page.dart';
 import 'package:giki/pages/settings_page.dart';
 import 'package:giki/pages/study_page.dart';
 import 'package:giki/pages/wiki_page.dart';
@@ -1121,6 +1122,79 @@ void main() {
     expect(find.text(Uri.base.origin), findsOneWidget);
     // Offered, not stored: nothing is saved until the user acts.
     expect(db.meta(MetaKeys.serverUrl), isNull);
+  });
+
+  testWidgets('the history lists every version and restores an older one', (
+    tester,
+  ) async {
+    const id = 'e2e-node-history';
+    await syncAsOtherDevice(mutations: [
+      nodeMutation(
+        clientSeq: 1,
+        id: id,
+        title: 'History',
+        body: 'first draft',
+        clock: clockBefore(const Duration(minutes: 30)),
+        op: 'INSERT',
+      ),
+      nodeMutation(
+        clientSeq: 2,
+        id: id,
+        title: 'History',
+        body: 'second draft',
+        clock: clockBefore(const Duration(minutes: 20)),
+      ),
+    ]);
+
+    PageVersion? restored;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () async {
+            restored = await Navigator.of(context).push<PageVersion>(
+              MaterialPageRoute(
+                builder: (_) => HistoryPage(
+                  load: () => api.history('nodes', id),
+                  shown:
+                      const PageVersion(title: 'History', body: 'second draft'),
+                ),
+              ),
+            );
+          },
+          child: const Text('open history'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open history'));
+    // The history comes over the network; pumpAndSettle alone would return
+    // while the request is still in flight.
+    for (var i = 0; i < 50 && find.byType(ListTile).evaluate().isEmpty; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+    }
+
+    expect(find.byType(ListTile), findsNWidgets(2));
+    expect(find.textContaining('(latest)'), findsOneWidget);
+    expect(find.textContaining('Created by'), findsOneWidget);
+
+    // The latest version is what the editor already shows: nothing to
+    // restore.
+    expect(find.textContaining('shown in the editor'), findsOneWidget);
+    await tester.tap(find.textContaining('(latest)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Restore this version'), findsNothing);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('Created by'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('first draft'), findsWidgets);
+    await tester.tap(find.text('Restore this version'));
+    await tester.pumpAndSettle();
+
+    expect(restored?.title, 'History');
+    expect(restored?.body, 'first draft');
   });
 
   testWidgets('the app shell builds against the real local database', (

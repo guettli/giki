@@ -314,6 +314,14 @@ func TestTombstoneAndHistory(t *testing.T) {
 			t.Errorf("history[%d].ActorUserID = %q, want alice", i, entry.ActorUserID)
 		}
 	}
+	// A limit keeps the newest entries, still oldest first.
+	latest, err := st.RecordHistory(ctx, "nodes", "n1", 1)
+	if err != nil {
+		t.Fatalf("RecordHistory limit 1: %v", err)
+	}
+	if len(latest) != 1 || latest[0].Op != "DELETE" {
+		t.Errorf("RecordHistory limit 1 = %+v, want only the newest entry (DELETE)", latest)
+	}
 	if _, err := st.RecordHistory(ctx, "change_log", "n1", 0); err == nil {
 		t.Error("RecordHistory should refuse a table that is not syncable")
 	}

@@ -39,4 +39,31 @@ void main() {
     expect(response.changes, isEmpty);
     expect(response.hasMore, isFalse);
   });
+
+  test('parses a history response, newest first', () {
+    const body = '''
+{
+  "table": "nodes", "record_id": "n1",
+  "history": [
+    {"seq": 3, "table": "nodes", "record_id": "n1", "op": "INSERT",
+     "updated_at": "2026-10-23T10:00:00.000Z",
+     "payload": {"id": "n1", "title": "Leitner", "body": "v1", "is_deleted": 0},
+     "actor_user_id": "alice", "origin_device_id": "phone-a",
+     "applied_at": "2026-10-23T10:00:01.000Z"},
+    {"seq": 9, "table": "nodes", "record_id": "n1", "op": "UPDATE",
+     "updated_at": "2026-10-24T10:00:00.000Z",
+     "payload": {"id": "n1", "title": "Leitner", "body": "v2", "is_deleted": 1},
+     "actor_user_id": "bob", "origin_device_id": "laptop-b",
+     "applied_at": "2026-10-24T10:00:01.000Z"}
+  ]
+}
+''';
+    final history = parseHistoryResponse(body);
+    expect(history.map((e) => e.seq), [9, 3]);
+    expect(history.first.actorUserId, 'bob');
+    expect(history.first.deletes, isTrue);
+    expect(history.last.deletes, isFalse);
+    expect(history.last.payload['body'], 'v1');
+    expect(parseHistoryResponse('{"history": null}'), isEmpty);
+  });
 }
