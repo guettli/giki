@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../auth/passkey_api.dart';
 import '../auth/webauthn.dart';
 import '../db/database.dart';
+import '../sync/serving_origin.dart';
 
 /// Lets the user point this device at a giki server and sign in with a
 /// passkey.
@@ -24,8 +25,8 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late final TextEditingController _url =
-      TextEditingController(text: widget.db.meta(MetaKeys.serverUrl) ?? '');
+  late final TextEditingController _url = TextEditingController(
+      text: widget.db.meta(MetaKeys.serverUrl) ?? servingOrigin(Uri.base));
   late final TextEditingController _user =
       TextEditingController(text: widget.db.meta(MetaKeys.userId) ?? '');
   // A second controller for the Advanced section: both text fields are built

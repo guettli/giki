@@ -36,6 +36,7 @@ import 'package:giki/db/link_index.dart';
 import 'package:giki/db/srs_merge.dart';
 import 'package:giki/db/repository.dart';
 import 'package:giki/main.dart';
+import 'package:giki/pages/settings_page.dart';
 import 'package:giki/pages/study_page.dart';
 import 'package:giki/pages/wiki_page.dart';
 import 'package:giki/srs/srs.dart';
@@ -1103,6 +1104,23 @@ void main() {
         reason: 'the $label field announces nothing to a screen reader',
       );
     }
+  });
+
+  testWidgets('a fresh device offers its own origin as the server', (
+    tester,
+  ) async {
+    // No server is stored yet: these phases sync through the API client, not
+    // through the settings page. The app was served by a web server, so that
+    // server is the default -- typing its URL by hand was the first hurdle
+    // on every new account.
+    expect(db.meta(MetaKeys.serverUrl), isNull);
+    await tester.pumpWidget(MaterialApp(home: SettingsPage(db: db)));
+    await tester.pumpAndSettle();
+
+    expect(Uri.base.origin, startsWith('http'));
+    expect(find.text(Uri.base.origin), findsOneWidget);
+    // Offered, not stored: nothing is saved until the user acts.
+    expect(db.meta(MetaKeys.serverUrl), isNull);
   });
 
   testWidgets('the app shell builds against the real local database', (

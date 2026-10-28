@@ -79,7 +79,12 @@ async function respond(event) {
   }
   let timer;
   const fresh = await Promise.race([
-    network.then((response) => (response.ok ? response : null), () => null),
+    // A 404 for a page is the server's real answer (an address that does not
+    // exist), not an outage: show it rather than the cached app.
+    network.then(
+      (response) => (response.ok || (navigate && response.status < 500) ? response : null),
+      () => null,
+    ),
     new Promise((resolve) => {
       timer = setTimeout(() => {
         slowUntil = Date.now() + SLOW_NETWORK_MS;
