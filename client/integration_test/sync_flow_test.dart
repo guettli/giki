@@ -35,6 +35,7 @@ import 'package:giki/db/ids.dart';
 import 'package:giki/db/link_index.dart';
 import 'package:giki/db/srs_merge.dart';
 import 'package:giki/db/repository.dart';
+import 'package:giki/db/search.dart';
 import 'package:giki/main.dart';
 import 'package:giki/pages/history_page.dart';
 import 'package:giki/pages/settings_page.dart';
@@ -1195,6 +1196,71 @@ void main() {
 
     expect(restored?.title, 'History');
     expect(restored?.body, 'first draft');
+  });
+
+  testWidgets('search finds saved and synced pages, but not deleted ones', (
+    _,
+  ) async {
+    nodes.save(title: 'Zettelkasten', body: 'slips of paper, linked by hand');
+    final now = DateTime.now().toUtc();
+    final stamp = formatClock(now);
+    // A tombstone must be newer than the page, or Last-Write-Wins drops it.
+    final later = formatClock(now.add(const Duration(seconds: 1)));
+    Delta arriving({int deleted = 0}) => Delta(
+          seq: 0,
+          table: 'nodes',
+          recordId: 'synced-searchable',
+          op: 'UPDATE',
+          payload: {
+            'id': 'synced-searchable',
+            'title': 'Mnemonic Major System',
+            'title_key': 'mnemonic major system',
+            'body': 'digits become consonants',
+            'created_at': stamp,
+            'created_by': 'another-device-user',
+            'updated_at': deleted == 1 ? later : stamp,
+            'updated_by': 'another-device-user',
+            'is_deleted': deleted,
+          },
+        );
+    db.applyDeltas([arriving()], db.cursor);
+
+    List<String> titles(String query) =>
+        nodes.search(query).map((hit) => hit.title).toList();
+    expect(titles('zettel'), ['Zettelkasten']);
+    expect(titles('paper linked'), ['Zettelkasten']);
+    expect(titles('consonant'), ['Mnemonic Major System'],
+        reason: 'a page that arrived by sync is not searchable');
+    expect(titles('AND "('), isEmpty, reason: 'FTS5 syntax must not throw');
+
+    // An upgraded device indexes the pages it already had, once.
+    db.raw.execute("INSERT INTO nodes_fts (nodes_fts) VALUES ('delete-all')");
+    db.raw.execute(
+        'DELETE FROM sync_meta WHERE key = ?', [searchIndexVersionKey]);
+    expect(titles('zettel'), isEmpty);
+    expect(ensureSearchIndex(db.raw), isTrue);
+    expect(ensureSearchIndex(db.raw), isFalse);
+    expect(titles('zettel'), ['Zettelkasten']);
+
+    db.applyDeltas([arriving(deleted: 1)], db.cursor);
+    expect(titles('consonant'), isEmpty,
+        reason: 'a page deleted elsewhere is still found');
+  });
+
+  testWidgets('typing in the search field lists matching pages', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MaterialApp(home: WikiPage(db: db, nodes: nodes)));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'zettel');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Zettelkasten'), findsOneWidget);
+    expect(find.textContaining('slips of paper'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'no such words anywhere');
+    await tester.pumpAndSettle();
+    expect(find.text('No page matches.'), findsOneWidget);
   });
 
   testWidgets('the app shell builds against the real local database', (

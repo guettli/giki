@@ -16,6 +16,7 @@ import 'package:web/web.dart' as web;
 import 'clock.dart';
 import 'ids.dart';
 import 'link_index.dart';
+import 'search.dart';
 import 'models.dart';
 import 'srs_merge.dart';
 
@@ -128,6 +129,9 @@ class GikiDatabase {
     // Repairs the link index of a device upgraded from a version whose deltas
     // did not maintain it. A no-op on every later start.
     ensureLinkIndex(db);
+    // Indexes the pages a device had before search existed. A no-op on every
+    // later start.
+    ensureSearchIndex(db);
     // Collapses review schedules duplicated by older versions, which used
     // random ids. Finding none is one indexed query.
     mergeDuplicateSchedules(db);

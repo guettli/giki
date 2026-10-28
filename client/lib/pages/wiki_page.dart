@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../db/database.dart';
 import '../db/repository.dart';
 import '../sync/api_client.dart';
+import '../wiki/snippet.dart';
 import '../wiki/wikilink.dart';
 import 'attachments_section.dart';
 import 'history_page.dart';
@@ -26,28 +27,105 @@ class WikiPage extends StatefulWidget {
 }
 
 class _WikiPageState extends State<WikiPage> {
+  final TextEditingController _query = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Pages that arrive by sync show up in the list and in the results
+    // without the user having to retype.
+    widget.db.nodesRevision.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    widget.db.nodesRevision.removeListener(_refresh);
+    _query.dispose();
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final recent = widget.nodes.recent();
+    final searching = _query.text.trim().isNotEmpty;
     return Scaffold(
-      body: recent.isEmpty
-          ? const Center(child: Text('No pages yet. Create one.'))
-          : ListView.builder(
-              itemCount: recent.length,
-              itemBuilder: (context, index) {
-                final node = recent[index];
-                return ListTile(
-                  title: Text(node.title.isEmpty ? '(untitled)' : node.title),
-                  subtitle: Text(node.updatedAt),
-                  onTap: () => _edit(node.id),
-                );
-              },
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Semantics(
+              textField: true,
+              label: 'Search pages',
+              child: TextField(
+                controller: _query,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Search pages',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: searching
+                      ? IconButton(
+                          tooltip: 'Clear search',
+                          icon: const Icon(Icons.clear),
+                          onPressed: () => setState(_query.clear),
+                        )
+                      : null,
+                ),
+              ),
             ),
+          ),
+          Expanded(child: searching ? _results() : _recent()),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _edit(null),
         tooltip: 'New page',
         child: const Icon(Icons.add),
       ),
+    );
+  }
+
+  Widget _recent() {
+    final recent = widget.nodes.recent();
+    if (recent.isEmpty) {
+      return const Center(child: Text('No pages yet. Create one.'));
+    }
+    return ListView.builder(
+      itemCount: recent.length,
+      itemBuilder: (context, index) {
+        final node = recent[index];
+        return ListTile(
+          title: Text(node.title.isEmpty ? '(untitled)' : node.title),
+          subtitle: Text(node.updatedAt),
+          onTap: () => _edit(node.id),
+        );
+      },
+    );
+  }
+
+  Widget _results() {
+    final hits = widget.nodes.search(_query.text);
+    if (hits.isEmpty) {
+      return const Center(child: Text('No page matches.'));
+    }
+    return ListView.builder(
+      itemCount: hits.length,
+      itemBuilder: (context, index) {
+        final hit = hits[index];
+        return ListTile(
+          title: Text(hit.title.isEmpty ? '(untitled)' : hit.title),
+          subtitle: Text.rich(
+            highlightSnippet(hit.snippet, Theme.of(context)),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          onTap: () => _edit(hit.id),
+        );
+      },
     );
   }
 

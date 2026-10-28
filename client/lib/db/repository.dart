@@ -13,6 +13,7 @@ import 'clock.dart';
 import 'database.dart';
 import 'ids.dart';
 import 'link_index.dart';
+import 'search.dart';
 
 /// A node as shown in lists.
 class NodeSummary {
@@ -65,6 +66,9 @@ class NodeRepository {
         ),
     ];
   }
+
+  /// Live nodes whose title or body matches [input], best match first.
+  List<SearchHit> search(String input) => searchNodes(_db.raw, input);
 
   /// Looks a node up by id.
   Node? byId(String id) {

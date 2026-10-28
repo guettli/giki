@@ -478,3 +478,70 @@ func joinSorted(values []string) string {
 	}
 	return out
 }
+
+// TestClientSearchIndexFollowsWrites checks the client's FTS5 triggers: every
+// kind of write -- insert, upsert, update, delete -- keeps the index and the
+// pages in step, which FTS5's own integrity check verifies.
+func TestClientSearchIndexFollowsWrites(t *testing.T) {
+	sqlDB := openClientDB(t)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := sqlDB.Exec(query, args...); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+	}
+	match := func(query string) []string {
+		t.Helper()
+		rows, err := sqlDB.Query(`SELECT n.id FROM nodes_fts JOIN nodes n ON n.rowid = nodes_fts.rowid
+			WHERE nodes_fts MATCH ? AND n.is_deleted = 0 ORDER BY n.id`, query)
+		if err != nil {
+			t.Fatalf("match %q: %v", query, err)
+		}
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	clock := "2026-10-28T10:00:00.000Z"
+	upsert := func(id, title, body string) {
+		t.Helper()
+		exec(`INSERT INTO nodes (id, title, title_key, body, created_at, updated_at)
+			VALUES (?, ?, lower(?), ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET title = excluded.title, body = excluded.body`,
+			id, title, title, body, clock, clock)
+	}
+
+	upsert("n1", "Leitner", "boxes for flashcards")
+	upsert("n2", "Café", "where the coffee is")
+	if got := match(`"leit"*`); len(got) != 1 || got[0] != "n1" {
+		t.Errorf("prefix search = %v, want [n1]", got)
+	}
+	if got := match(`"cafe"*`); len(got) != 1 || got[0] != "n2" {
+		t.Errorf("diacritics-insensitive search = %v, want [n2]", got)
+	}
+
+	upsert("n1", "Leitner", "a ladder of boxes")
+	if got := match(`"flashcards"*`); len(got) != 0 {
+		t.Errorf("old body still found after an upsert: %v", got)
+	}
+	if got := match(`"ladder"*`); len(got) != 1 {
+		t.Errorf("new body not found after an upsert: %v", got)
+	}
+
+	exec(`UPDATE nodes SET is_deleted = 1 WHERE id = 'n2'`)
+	if got := match(`"coffee"*`); len(got) != 0 {
+		t.Errorf("tombstoned page found: %v", got)
+	}
+	exec(`DELETE FROM nodes WHERE id = 'n1'`)
+	if got := match(`"ladder"*`); len(got) != 0 {
+		t.Errorf("deleted page found: %v", got)
+	}
+
+	exec(`INSERT INTO nodes_fts (nodes_fts) VALUES ('integrity-check')`)
+}
