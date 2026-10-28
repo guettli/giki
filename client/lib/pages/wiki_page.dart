@@ -2,11 +2,17 @@
 /// collection more than a pile of notes.
 library;
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:web/web.dart' as web;
+
+import '../db/attachments.dart';
 
 import '../db/database.dart';
 import '../db/repository.dart';
 import '../sync/api_client.dart';
+import '../wiki/markdown_view.dart';
 import '../wiki/snippet.dart';
 import '../wiki/wikilink.dart';
 import 'attachments_section.dart';
@@ -191,6 +197,18 @@ class _NodeEditorState extends State<NodeEditor> {
   /// True when the stored page moved on while this editor had unsaved edits.
   bool _changedElsewhere = false;
 
+  /// True while the page is shown rendered rather than as text fields. An
+  /// existing page opens for reading; a new one opens for writing.
+  late bool _reading = widget.nodeId != null;
+
+  late final AttachmentRepository _attachments = AttachmentRepository(
+    widget.db,
+  );
+
+  /// Decoded inline images by hash, kept across rebuilds: Image.memory treats
+  /// every new Uint8List as a new picture and would decode it again.
+  final Map<String, Uint8List> _images = {};
+
   /// True when another device deleted the page while this editor had it open.
   /// The text stays, so the user can restore the page or copy what they typed.
   bool _deletedElsewhere = false;
@@ -204,11 +222,49 @@ class _NodeEditorState extends State<NodeEditor> {
     _savedTitle = _title.text;
     _savedBody = _body.text;
     widget.db.nodesRevision.addListener(_onNodesChanged);
+    widget.db.attachmentsRevision.addListener(_onAttachmentsChanged);
+  }
+
+  /// An attachment or its bytes arrived: an inline image may now be showable.
+  void _onAttachmentsChanged() {
+    if (mounted && _reading) {
+      setState(() {});
+    }
+  }
+
+  /// The bytes of this page's attachment called [filename], if this device
+  /// has them. Missing bytes are fetched by the attachments section below,
+  /// whose arrival rebuilds this view.
+  Uint8List? _imageBytes(String filename) {
+    final nodeId = _node?.id;
+    if (nodeId == null) {
+      return null;
+    }
+    for (final attachment in _attachments.forNode(nodeId)) {
+      if (attachment.filename == filename && attachment.hasBytes) {
+        final cached = _images[attachment.sha256];
+        if (cached != null) {
+          return cached;
+        }
+        final bytes = _attachments.bytes(attachment.sha256);
+        if (bytes != null) {
+          _images[attachment.sha256] = bytes;
+        }
+        return bytes;
+      }
+    }
+    return null;
+  }
+
+  void _openExternal(Uri uri) {
+    // noopener: the opened page gets no handle on this one.
+    web.window.open(uri.toString(), '_blank', 'noopener,noreferrer');
   }
 
   @override
   void dispose() {
     widget.db.nodesRevision.removeListener(_onNodesChanged);
+    widget.db.attachmentsRevision.removeListener(_onAttachmentsChanged);
     _title.dispose();
     _body.dispose();
     super.dispose();
@@ -397,8 +453,24 @@ class _NodeEditorState extends State<NodeEditor> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(node == null ? 'New page' : 'Edit page'),
+        title: Text(
+          node == null
+              ? 'New page'
+              : _reading
+                  ? (_title.text.trim().isEmpty ? '(untitled)' : _title.text)
+                  : 'Edit page',
+        ),
         actions: [
+          if (node != null)
+            IconButton(
+              tooltip: _reading ? 'Edit' : 'Read',
+              icon: Icon(
+                _reading
+                    ? Icons.edit_outlined
+                    : Icons.chrome_reader_mode_outlined,
+              ),
+              onPressed: () => setState(() => _reading = !_reading),
+            ),
           if (node != null)
             IconButton(
               tooltip: 'History',
@@ -452,34 +524,45 @@ class _NodeEditorState extends State<NodeEditor> {
                 ),
               ],
             ),
-          // Semantics around every field: Flutter renders InputDecoration's
-          // label as a separate node, so the editable element itself reaches
-          // the browser's accessibility tree with no name at all -- a screen
-          // reader announces "edit text" and nothing more.
-          Semantics(
-            textField: true,
-            label: 'Title',
-            child: TextField(
-              controller: _title,
-              decoration: const InputDecoration(labelText: 'Title'),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Semantics(
-            textField: true,
-            label: 'Body',
-            child: TextField(
-              controller: _body,
-              minLines: 8,
-              maxLines: null,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Body',
-                helperText: 'Link with [[Another Page]]. A link to a page that '
-                    'does not exist yet is fine.',
+          if (_reading)
+            PageMarkdown(
+              body: _body.text,
+              imageBytes: _imageBytes,
+              onWikiLink: _follow,
+              onExternalLink: _openExternal,
+            )
+          else ...[
+            // Semantics around every field: Flutter renders InputDecoration's
+            // label as a separate node, so the editable element itself reaches
+            // the browser's accessibility tree with no name at all -- a screen
+            // reader announces "edit text" and nothing more.
+            Semantics(
+              textField: true,
+              label: 'Title',
+              child: TextField(
+                controller: _title,
+                decoration: const InputDecoration(labelText: 'Title'),
               ),
             ),
-          ),
+            const SizedBox(height: 16),
+            Semantics(
+              textField: true,
+              label: 'Body',
+              child: TextField(
+                controller: _body,
+                minLines: 8,
+                maxLines: null,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Body',
+                  helperText: 'Markdown. Link with [[Another Page]] -- a page '
+                      'that does not exist yet is fine. Show an attached image '
+                      'with ![description](file name).',
+                  helperMaxLines: 3,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           AttachmentsSection(
             db: widget.db,
@@ -565,6 +648,8 @@ class _NodeEditorState extends State<NodeEditor> {
       return;
     }
     setState(() {
+      // Shown as text, so it is plain that this is an unsaved edit.
+      _reading = false;
       _title.text = version!.title;
       _body.text = version.body;
     });
