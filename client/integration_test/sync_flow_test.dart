@@ -1314,24 +1314,29 @@ void main() {
 
     final id = nodes.save(
       title: 'Geography',
-      body: 'Some notes.\n\n- Capital of France :: Paris\n',
+      body: 'Some notes.\n\n- Capital of Burkina Faso :: Ouagadougou\n',
     );
-    expect(due(), contains('Capital of France :: Paris'));
+    expect(due(), contains('Capital of Burkina Faso :: Ouagadougou'));
 
     // The card syncs like any other: another device studies it too.
     await sync.syncOnce();
-    final cardId = pageCardId(id, 'capital of france');
+    final cardId = pageCardId(id, 'capital of burkina faso');
     final trail = await history('cards', cardId);
     expect(trail, isNotEmpty, reason: 'the card never reached the server');
-    expect((trail.last['payload'] as Map<String, Object?>)['back'], 'Paris');
+    expect(
+        (trail.last['payload'] as Map<String, Object?>)['back'], 'Ouagadougou');
 
     // Fixing the answer keeps the card (and its schedule); removing the line
     // removes it.
-    nodes.save(id: id, title: 'Geography', body: 'Capital of France :: Paris!');
-    expect(due(), contains('Capital of France :: Paris!'));
-    expect(due(), isNot(contains('Capital of France :: Paris')));
+    nodes.save(
+        id: id,
+        title: 'Geography',
+        body: 'Capital of Burkina Faso :: Ouagadougou!');
+    expect(due(), contains('Capital of Burkina Faso :: Ouagadougou!'));
+    expect(due(), isNot(contains('Capital of Burkina Faso :: Ouagadougou')));
     nodes.save(id: id, title: 'Geography', body: 'No cards any more.');
-    expect(due().where((c) => c.startsWith('Capital of France')), isEmpty);
+    expect(
+        due().where((c) => c.startsWith('Capital of Burkina Faso')), isEmpty);
   });
 
   testWidgets('the app shell builds against the real local database', (
