@@ -497,10 +497,14 @@ void main() {
     ], db.cursor);
   }
 
+  /// Opens [id] the way a user does, then switches it to editing: an
+  /// existing page opens rendered, for reading.
   Future<void> openEditor(WidgetTester tester, String id) async {
     await tester.pumpWidget(MaterialApp(
       home: NodeEditor(db: db, nodes: nodes, nodeId: id),
     ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit'));
     await tester.pumpAndSettle();
   }
 
@@ -1268,6 +1272,39 @@ void main() {
     expect(find.text('No page matches.'), findsOneWidget);
   });
 
+  testWidgets('an existing page opens rendered, and its links lead on', (
+    tester,
+  ) async {
+    final id = nodes.save(
+      title: 'Rendered',
+      body: '# Heading\n\nSome **bold** text and a link to '
+          '[[Rendered Target|the target]].\n\n`[[Not A Link]]`',
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: NodeEditor(db: db, nodes: nodes, nodeId: id),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextField), findsNothing,
+        reason: 'an existing page should open for reading');
+    expect(find.text('Heading'), findsOneWidget);
+    expect(find.textContaining('**bold**'), findsNothing);
+    expect(nodes.byTitle('rendered target'), isNull);
+
+    await tester.tap(find.byTooltip('Edit'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNWidgets(2));
+    await tester.tap(find.byTooltip('Read'));
+    await tester.pumpAndSettle();
+
+    // Following a link to a page that does not exist yet creates it, as the
+    // "Links out" list always did.
+    await tester.tapOnText(find.textRange.ofSubstring('the target'));
+    await tester.pumpAndSettle();
+    expect(nodes.byTitle('rendered target'), isNotNull);
+    expect(find.text('Rendered Target'), findsWidgets);
+  });
+
   testWidgets('the app shell builds against the real local database', (
     tester,
   ) async {
@@ -1277,7 +1314,11 @@ void main() {
     expect(find.text('giki'), findsOneWidget);
     expect(find.text('Wiki'), findsOneWidget);
     expect(find.text('Study'), findsOneWidget);
-    // The page that survived the earlier phases is listed.
+    // The page that survived the earlier phases is there. Found through the
+    // search field: the list is built lazily, and the earlier phases have
+    // added enough pages to push it below the fold.
+    await tester.enterText(find.byType(TextField), 'Spaced Repetition');
+    await tester.pumpAndSettle();
     expect(find.text('Spaced Repetition'), findsWidgets);
   });
 }
