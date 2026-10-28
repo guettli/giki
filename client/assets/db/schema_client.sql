@@ -249,3 +249,39 @@ CREATE TABLE IF NOT EXISTS blobs (
     created_at TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS blobs_pending ON blobs (sha256) WHERE uploaded = 0;
+
+-- ---------------------------------------------------------------------------
+-- Full-text search (local, NOT synced)
+-- ---------------------------------------------------------------------------
+--
+-- An FTS5 index over the title and body of every node, so search works
+-- offline and answers as fast as the local database. It is an external-content
+-- table: the text lives in `nodes` only, and the index holds just the tokens.
+--
+-- These triggers fire for every write, synced or local -- unlike the outbox
+-- triggers, they do not look at sync_mute: a page that arrives from another
+-- device must be found too. Tombstoned pages stay indexed and are filtered out
+-- at query time, which keeps the triggers trivial.
+--
+-- A device that had pages before this index existed gets them indexed once,
+-- by ensureSearchIndex in client/lib/db/search.dart.
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+    title, body,
+    content = 'nodes', content_rowid = 'rowid',
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER IF NOT EXISTS nodes_fts_insert AFTER INSERT ON nodes BEGIN
+    INSERT INTO nodes_fts (rowid, title, body) VALUES (NEW.rowid, NEW.title, NEW.body);
+END;
+
+CREATE TRIGGER IF NOT EXISTS nodes_fts_delete AFTER DELETE ON nodes BEGIN
+    INSERT INTO nodes_fts (nodes_fts, rowid, title, body)
+    VALUES ('delete', OLD.rowid, OLD.title, OLD.body);
+END;
+
+CREATE TRIGGER IF NOT EXISTS nodes_fts_update AFTER UPDATE OF title, body ON nodes BEGIN
+    INSERT INTO nodes_fts (nodes_fts, rowid, title, body)
+    VALUES ('delete', OLD.rowid, OLD.title, OLD.body);
+    INSERT INTO nodes_fts (rowid, title, body) VALUES (NEW.rowid, NEW.title, NEW.body);
+END;
