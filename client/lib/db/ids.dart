@@ -51,6 +51,12 @@ String nameBasedId(String namespace, List<String> parts) {
   return _format(bytes);
 }
 
+/// The id of the card written as a `question :: answer` line on page
+/// [nodeId]; [key] is the question's cardKey. Every device computes the same
+/// one, so the card a page produces is one row, wherever it was saved.
+String pageCardId(String nodeId, String key) =>
+    nameBasedId('giki/page_card', [nodeId, key]);
+
 /// The id of [userId]'s review schedule for [cardId]. Every device computes
 /// the same one.
 String srsStateId(String cardId, String userId) =>

@@ -13,6 +13,7 @@ import 'clock.dart';
 import 'database.dart';
 import 'ids.dart';
 import 'link_index.dart';
+import 'page_cards.dart';
 import 'search.dart';
 
 /// A node as shown in lists.
@@ -110,17 +111,29 @@ class NodeRepository {
       [nodeId, title, titleKey, body, now, _db.userId, now, _db.userId],
     );
     reindexLinks(_db.raw, nodeId);
+    syncPageCards(_db.raw,
+        nodeId: nodeId,
+        body: body,
+        pageDeleted: false,
+        userId: _db.userId,
+        now: now);
     return nodeId;
   }
 
   /// Tombstones a node. The row stays, so the deletion can be replicated to
   /// devices that are still offline.
+  ///
+  /// The cards the page wrote with `question :: answer` lines are deleted
+  /// with it; restoring the page writes them again.
   void delete(String id) {
+    final now = nowClock();
     _db.raw.execute(
       'UPDATE nodes SET is_deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?',
-      [nowClock(), _db.userId, id],
+      [now, _db.userId, id],
     );
     reindexLinks(_db.raw, id);
+    syncPageCards(_db.raw,
+        nodeId: id, body: '', pageDeleted: true, userId: _db.userId, now: now);
   }
 
   /// The nodes that link to [titleKey] -- the passive context that makes a

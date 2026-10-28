@@ -24,8 +24,11 @@ still needs a web worker (see [docs/architecture.md](docs/architecture.md)).
   title, so you can link to a page that does not exist yet -- following the
   link creates it. Every page shows its backlinks, which is how context
   accumulates without anyone maintaining it.
-* **Spaced repetition.** Flashcards on a Leitner box ladder. Scheduling state
-  is per user, so a shared knowledge base does not mean shared progress.
+* **Spaced repetition.** Flashcards on a Leitner box ladder. Write a card
+  right where the knowledge lives -- a line `Question :: Answer` in any page
+  becomes a card, and editing or removing the line updates or removes it.
+  Scheduling state is per user, so a shared knowledge base does not mean
+  shared progress.
 * **Offline by default.** The local database is the source of truth. Reads and
   writes never wait for the network; sync is a background detail.
 * **Multi-user with an audit trail.** Every accepted change is appended to a
