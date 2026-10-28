@@ -594,8 +594,9 @@ class _NodeEditorState extends State<NodeEditor> {
                   labelText: 'Body',
                   helperText: 'Markdown. Link with [[Another Page]] -- a page '
                       'that does not exist yet is fine. Show an attached image '
-                      'with ![description](file name).',
-                  helperMaxLines: 3,
+                      'with ![description](file name). A line '
+                      '"Question :: Answer" becomes a flashcard.',
+                  helperMaxLines: 4,
                 ),
               ),
             ),
