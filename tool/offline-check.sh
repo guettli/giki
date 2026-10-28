@@ -1,6 +1,8 @@
 #!/bin/sh
 # Checks that the PWA starts without a network: load it once, stop the
 # server, reload, and expect the home screen -- on / and on a deep link.
+# Before that, with the service worker in control, an unknown address must
+# still show the server's 404 page rather than the cached app.
 #
 #   tool/offline-check.sh
 #
@@ -62,6 +64,15 @@ until_true 60 "(async () => {
 })()" || {
     echo "the service worker never cached the app" >&2
     x eval "(async () => (await (await caches.open('giki-app-v1')).keys()).map((r) => r.url).join(' '))()" >&2 || true
+    exit 1
+}
+
+# Online, a path the app does not have is the server's to answer (issue #6);
+# the worker must not paper over the 404 with its cached shell.
+x open /adminfoooo >/dev/null || true
+until_true 30 "document.title === 'Not found - giki'" || {
+    echo "with the service worker in control, an unknown path did not show the 404 page" >&2
+    x eval "document.title + ' | ' + location.href" >&2 || true
     exit 1
 }
 

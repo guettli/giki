@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/guettli/giki/internal/auth"
@@ -45,7 +46,6 @@ func TestWebUIServesTheApp(t *testing.T) {
 		"/main.dart.js":         "// app",
 		"/sqlite3.wasm":         "wasm",
 		"/assets/db/schema.sql": "-- schema",
-		"/some/deep/link":       "<!doctype html><title>giki</title>", // falls back to the shell
 	} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -55,6 +55,30 @@ func TestWebUIServesTheApp(t *testing.T) {
 		}
 		if got := rec.Body.String(); got != want {
 			t.Errorf("GET %s served %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestWebUIUnknownPathIsNotFound(t *testing.T) {
+	handler := WebUI(webDir(t))
+
+	// The app has no URL routes, so the shell under any other path would show
+	// the home screen at an address that means nothing (issue #6).
+	for _, path := range []string{"/adminfoooo", "/some/deep/link", "/assets", "/assets/", "/main.dart.js/x"} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", path, rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "Not found") || !strings.Contains(body, `href="/"`) {
+			t.Errorf("GET %s served %q, want a not-found page linking to the app", path, body)
+		}
+		if strings.Contains(body, "main.dart.js") || strings.Contains(body, "flutter") {
+			t.Errorf("GET %s: the not-found page must not load the app", path)
+		}
+		if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+			t.Errorf("GET %s Content-Type = %q", path, got)
 		}
 	}
 }

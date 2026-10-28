@@ -1,6 +1,7 @@
 package syncapi
 
 import (
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,23 +20,44 @@ func WebUI(dir string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := filepath.Clean(strings.TrimPrefix(r.URL.Path, "/"))
 		// http.Dir already refuses to escape dir; this only decides whether to
-		// serve a file or fall back to the shell.
+		// serve the shell, a file, or a 404.
 		// index.html is served directly rather than through the file server,
 		// which would redirect /index.html to ./ and cost a round trip.
 		if clean == "." || clean == "/" || clean == "index.html" {
 			serveShell(w, r, dir)
 			return
 		}
-		if _, err := os.Stat(filepath.Join(dir, clean)); err != nil {
-			// Unknown path: hand the request to the app rather than 404, so a
-			// deep link or a reload inside the PWA still lands on the shell.
-			serveShell(w, r, dir)
+		if info, err := os.Stat(filepath.Join(dir, clean)); err != nil || info.IsDir() {
+			// The app has no URL routes: every screen lives at /. So any other
+			// path is a typo or a stale link, and saying so beats quietly
+			// showing the home screen under a URL that means nothing.
+			notFound(w)
 			return
 		}
 
 		setCacheHeaders(w)
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// notFoundPage is deliberately plain: it must not load the app, whose service
+// worker would otherwise take over a URL that does not exist.
+const notFoundPage = `<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not found - giki</title>
+<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem}</style>
+<h1>Not found</h1>
+<p>There is nothing at this address.</p>
+<p><a href="/">Open giki</a></p>
+`
+
+// notFound answers 404 with a page that leads back to the app.
+func notFound(w http.ResponseWriter) {
+	setCacheHeaders(w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = io.WriteString(w, notFoundPage)
 }
 
 // serveShell writes index.html.
