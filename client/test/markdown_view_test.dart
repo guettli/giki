@@ -142,4 +142,15 @@ void main() {
     expect(find.textContaining('shown as plain text'), findsOneWidget);
     expect(find.textContaining('Some **notes**'), findsOneWidget);
   });
+
+  // markdown 7.3.1's GitHub flavour turned this into an empty list item and
+  // dropped the paragraph.
+  test('a paragraph over a lone "-" line is a heading, not lost', () {
+    String html(String body) => md.renderToHtml(parsePage(body));
+    expect(html('Hello world\n-'), contains('<h2>Hello world</h2>'));
+    expect(html('- foo\n---'), contains('<li>foo</li>'));
+    expect(html('- foo\n---'), contains('<hr />'));
+    expect(html('Foo\n- bar'), contains('<li>bar</li>'));
+    expect(html('a | b\n--- | ---\n1 | 2'), contains('<table>'));
+  });
 }

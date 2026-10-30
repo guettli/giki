@@ -76,6 +76,7 @@ class PageMarkdown extends StatelessWidget {
     return SelectionArea(
       child: MarkdownBody(
         data: source,
+        blockSyntaxes: pageBlockSyntaxes,
         inlineSyntaxes: [WikiLinkSyntax()],
         extensionSet: md.ExtensionSet.gitHubFlavored,
         onTapLink: (text, href, title) {

@@ -56,9 +56,19 @@ String? percentDecode(String text) {
   }
 }
 
+/// Block syntaxes tried before the extension set's.
+///
+/// markdown 7.3.1's GitHub flavour tries its checkbox-list syntax before the
+/// setext heading, so a paragraph followed by a lone `-` line became an empty
+/// list item and the paragraph's text was gone. CommonMark (and GitHub) make
+/// it a heading; trying the heading syntax first does that, and leaves lists,
+/// rules and tables as they were.
+const List<md.BlockSyntax> pageBlockSyntaxes = [md.SetextHeaderSyntax()];
+
 /// A Markdown document set up exactly as PageMarkdown renders one.
 md.Document pageDocument() => md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
+      blockSyntaxes: pageBlockSyntaxes,
       inlineSyntaxes: [WikiLinkSyntax()],
       encodeHtml: false,
     );
