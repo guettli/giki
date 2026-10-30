@@ -142,7 +142,9 @@ class NodeRepository {
   ///
   /// The cards the page wrote with `question :: answer` lines are deleted
   /// with it; restoring the page writes them again.
-  void delete(String id) {
+  ///
+  /// Returns the deletion's clock, which [undoDelete] needs.
+  String delete(String id) {
     final now = nowClock();
     _db.raw.execute('BEGIN IMMEDIATE');
     try {
@@ -164,6 +166,40 @@ class NodeRepository {
             now: now);
       }
       _db.raw.execute('COMMIT');
+    } on Object {
+      _db.raw.execute('ROLLBACK');
+      rethrow;
+    }
+    return now;
+  }
+
+  /// Takes back the [delete] of [id] that returned [deletedAt]: the page and
+  /// the cards that deletion took with it come back exactly as they were --
+  /// including a card's answer fixed on the Study page, which saving the
+  /// page's text again would overwrite.
+  ///
+  /// Does nothing, and returns false, once anything else has happened to
+  /// the page since: restored or deleted again, here or on another device.
+  /// An Undo pressed late must not overwrite what came after it.
+  bool undoDelete(String id, String deletedAt) {
+    final now = nowClock();
+    _db.raw.execute('BEGIN IMMEDIATE');
+    try {
+      final restored = _db.raw.select(
+        'UPDATE nodes SET is_deleted = 0, updated_at = ?, updated_by = ? '
+        'WHERE id = ? AND is_deleted = 1 AND updated_at = ? RETURNING id',
+        [now, _db.userId, id, deletedAt],
+      );
+      if (restored.isNotEmpty) {
+        reindexLinks(_db.raw, id);
+        _db.raw.execute(
+          'UPDATE cards SET is_deleted = 0, updated_at = ?, updated_by = ? '
+          'WHERE node_id = ? AND is_deleted = 1 AND updated_at = ?',
+          [now, _db.userId, id, deletedAt],
+        );
+      }
+      _db.raw.execute('COMMIT');
+      return restored.isNotEmpty;
     } on Object {
       _db.raw.execute('ROLLBACK');
       rethrow;

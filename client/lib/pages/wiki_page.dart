@@ -11,6 +11,7 @@ import '../db/attachments.dart';
 
 import '../db/database.dart';
 import '../db/repository.dart';
+import '../srs/card_text.dart';
 import '../sync/api_client.dart';
 import '../wiki/markdown_view.dart';
 import '../wiki/snippet.dart';
@@ -394,6 +395,78 @@ class _NodeEditorState extends State<NodeEditor> {
     return choice ?? false;
   }
 
+  /// Deletes [shown] after asking, and offers to undo it for a while.
+  ///
+  /// A deleted page is a tombstone that syncs to every device, and it takes
+  /// the cards its lines wrote with it. Undo takes back exactly this
+  /// deletion (NodeRepository.undoDelete), and only while nothing else has
+  /// happened to the page.
+  Future<void> _delete(Node shown) async {
+    final cards = parseCardLines(shown.body).length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete "${shown.title}"?'),
+        content: Text([
+          'The page is deleted on all your devices.',
+          if (cards == 1) 'Its flashcard is deleted with it.',
+          if (cards > 1) 'Its $cards flashcards are deleted with it.',
+          if (_dirty) 'Your unsaved changes are discarded.',
+        ].join(' ')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    final nodes = widget.nodes;
+    // This page is about to close; the snack bar lives on in the app's
+    // messenger, below whichever page is shown next.
+    final messenger = ScaffoldMessenger.of(context);
+    // Read after the dialog: a sync may have changed or deleted the page
+    // while it was open.
+    final node = nodes.byId(shown.id);
+    Navigator.of(context).pop();
+    messenger.hideCurrentSnackBar();
+    if (node == null) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('The page was already deleted on another device.')));
+      return;
+    }
+    final deletedAt = nodes.delete(node.id);
+    messenger.showSnackBar(SnackBar(
+      content: Text('Deleted "${node.title}"'),
+      // A snack bar with an action stays until it is used, unless told
+      // otherwise -- and it would hold back every message after it.
+      persist: false,
+      duration: const Duration(seconds: 10),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () {
+          final String message;
+          if (!nodes.undoDelete(node.id, deletedAt)) {
+            message = 'Too late to undo: the page has changed since.';
+          } else if (nodes.byTitle(node.title)?.id != node.id) {
+            message = 'Restored. Another page is called '
+                '"${node.title}" too.';
+          } else {
+            return;
+          }
+          messenger.showSnackBar(SnackBar(content: Text(message)));
+        },
+      ),
+    ));
+  }
+
   Future<bool> _confirmLeave() async {
     final choice = await showDialog<bool>(
       context: context,
@@ -509,10 +582,7 @@ class _NodeEditorState extends State<NodeEditor> {
             IconButton(
               tooltip: 'Delete',
               icon: const Icon(Icons.delete_outline),
-              onPressed: () {
-                widget.nodes.delete(node.id);
-                Navigator.of(context).pop();
-              },
+              onPressed: () => _delete(node),
             ),
           IconButton(
               tooltip: 'Save', icon: const Icon(Icons.check), onPressed: _save),
