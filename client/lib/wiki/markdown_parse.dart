@@ -77,8 +77,10 @@ final RegExp _trailingBackslash = RegExp(r'(?<!\\)((?:\\\\)*\\)$');
 /// ends with a backslash -- `[C:\Temp\` as a page's last line is enough.
 /// Page text comes from every device, so one such line would make the page
 /// unreadable everywhere. The workaround puts a space after a backslash that
-/// ends a line, which only drops a hard line break; it is used only when the
-/// text as written does not parse.
+/// ends a line, and only when the text as written does not parse: first on
+/// lines that end a paragraph, where a backslash is shown as it is anyway,
+/// and only if that is not enough on every line, which drops the hard line
+/// breaks a backslash makes inside a paragraph.
 String? renderableMarkdown(String body) => parseRenderable(body)?.source;
 
 /// The text PageMarkdown renders for [body] (see [renderableMarkdown]) and
@@ -88,13 +90,24 @@ String? renderableMarkdown(String body) => parseRenderable(body)?.source;
   if (nodes != null) {
     return (source: body, nodes: nodes);
   }
-  final patched = const LineSplitter()
-      .convert(body)
-      .map((line) =>
-          line.replaceFirstMapped(_trailingBackslash, (m) => '${m[1]} '))
-      .join('\n');
-  final patchedNodes = _tryParse(patched);
-  return patchedNodes == null ? null : (source: patched, nodes: patchedNodes);
+  final lines = const LineSplitter().convert(body);
+  String patch(bool Function(int index) where) => [
+        for (var i = 0; i < lines.length; i++)
+          where(i)
+              ? lines[i]
+                  .replaceFirstMapped(_trailingBackslash, (m) => '${m[1]} ')
+              : lines[i],
+      ].join('\n');
+  for (final patched in [
+    patch((i) => i == lines.length - 1 || lines[i + 1].trim().isEmpty),
+    patch((_) => true),
+  ]) {
+    final patchedNodes = _tryParse(patched);
+    if (patchedNodes != null) {
+      return (source: patched, nodes: patchedNodes);
+    }
+  }
+  return null;
 }
 
 List<md.Node>? _tryParse(String body) {

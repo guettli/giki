@@ -550,7 +550,10 @@ class _NodeEditorState extends State<NodeEditor> {
     final backlinks = node == null
         ? const <NodeSummary>[]
         : widget.nodes.backlinks(node.titleKey);
-    final targets = parseLinks(_body.text);
+    // From the link index, so as saved: parsing the text on every keystroke
+    // is a full Markdown parse, which a long page makes slow.
+    final targets =
+        node == null ? const <String>[] : widget.nodes.linksFrom(node.id);
 
     return Scaffold(
       appBar: AppBar(

@@ -108,6 +108,9 @@ void main() {
     expect(renderableMarkdown(r'[C:\Temp\'), r'[C:\Temp\ ');
     expect(renderableMarkdown('ok\n\n[C:\\Temp\\\n\nmore'),
         'ok\n\n[C:\\Temp\\ \n\nmore');
+    // A line break inside another paragraph stays.
+    expect(renderableMarkdown('one\\\ntwo\n\n[C:\\Temp\\'),
+        'one\\\ntwo\n\n[C:\\Temp\\ ');
     // Text that parses is left alone, hard line breaks included.
     expect(renderableMarkdown('line one\\\nline two'), 'line one\\\nline two');
     expect(renderableMarkdown(r'[a]: <'), isNull);
