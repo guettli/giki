@@ -22,9 +22,8 @@
 
 import 'dart:convert';
 
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:giki/auth/webauthn.dart';
 import 'package:giki/auth/webauthn_json.dart';
@@ -1445,6 +1444,37 @@ void main() {
     expect(nodes.byId(id)?.body, 'Written again');
   });
 
+  testWidgets('wanted pages list the links to missing pages', (tester) async {
+    nodes.save(title: 'Ferries', body: 'to [[zanzibar notes]]');
+    nodes.save(
+      title: 'Islands',
+      body: 'See [[Zanzibar Notes]] and [[Pemba Island]]; '
+          '`[[Not Wanted]]` is code.',
+    );
+    final wanted = {for (final page in nodes.wanted()) page.title: page};
+    expect(wanted['Zanzibar Notes']?.linkedFrom,
+        unorderedEquals(['Ferries', 'Islands']));
+    expect(wanted['Pemba Island']?.linkedFrom, ['Islands']);
+    expect(
+        wanted.keys.map((t) => t.toLowerCase()), isNot(contains('not wanted')));
+
+    await tester.pumpWidget(MaterialApp(home: WikiPage(db: db, nodes: nodes)));
+    await tester.tap(find.text('Wanted'));
+    await tester.pumpAndSettle();
+    // The list, not the search field, which scrolls too.
+    await tester.scrollUntilVisible(find.text('Zanzibar Notes'), 200,
+        scrollable: find
+            .descendant(
+                of: find.byType(ListView), matching: find.byType(Scrollable))
+            .first);
+    await tester.tap(find.text('Zanzibar Notes'));
+    await tester.pumpAndSettle();
+    expect(nodes.byTitle('zanzibar notes')?.title, 'Zanzibar Notes',
+        reason: 'tapping a wanted page did not create it');
+    expect(
+        nodes.wanted().map((p) => p.title), isNot(contains('Zanzibar Notes')));
+  });
+
   testWidgets('the app shell builds against the real local database', (
     tester,
   ) async {
@@ -1459,7 +1489,37 @@ void main() {
     // added enough pages to push it below the fold.
     await tester.enterText(find.byType(TextField), 'Spaced Repetition');
     await tester.pumpAndSettle();
-    expect(find.text('Spaced Repetition'), findsWidgets);
+    expect(find.text('Spaced Repetition'), findsWidgets,
+        reason: 'field: '
+            '"${tester.widget<TextField>(find.byType(TextField)).controller?.text}", '
+            'page: ${nodes.byTitle('spaced repetition')?.id}, '
+            'hits: ${nodes.search('Spaced Repetition').map((h) => h.title).toList()}, '
+            'focus: ${FocusManager.instance.primaryFocus}');
+  });
+
+  testWidgets('Ctrl+K jumps to the search, Ctrl+S saves', (tester) async {
+    Future<void> press(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await tester.pumpWidget(GikiApp(db: db));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Study'));
+    await tester.pumpAndSettle();
+    await press(LogicalKeyboardKey.keyK);
+    final search = tester.widget<TextField>(find.byType(TextField));
+    expect(search.decoration?.hintText, 'Search pages');
+    expect(search.focusNode?.hasFocus, isTrue,
+        reason: 'Ctrl+K did not focus the search field');
+
+    final id = nodes.save(title: 'Shortcut', body: 'before');
+    await openEditor(tester, id);
+    await tester.enterText(find.byType(TextField).at(1), 'after');
+    await press(LogicalKeyboardKey.keyS);
+    expect(nodes.byId(id)!.body, 'after', reason: 'Ctrl+S did not save');
   });
 }
 

@@ -22,8 +22,13 @@ String normalizeTitle(String title) => title
 
 /// Returns the normalized title_keys of the `[[links]]` that [body] shows, in
 /// first-seen order and without duplicates.
-List<String> parseLinks(String body) {
-  final keys = <String>[];
+List<String> parseLinks(String body) =>
+    [for (final target in linkTargets(body)) normalizeTitle(target)];
+
+/// The targets of the `[[links]]` that [body] shows, as written, in
+/// first-seen order and one per title_key.
+List<String> linkTargets(String body) {
+  final targets = <String>[];
   final seen = <String>{};
   void walk(List<md.Node> nodes) {
     for (final node in nodes) {
@@ -35,7 +40,7 @@ List<String> parseLinks(String body) {
       if (target != null) {
         final key = normalizeTitle(target);
         if (key.isNotEmpty && seen.add(key)) {
-          keys.add(key);
+          targets.add(target.trim());
         }
       }
       walk(node.children ?? const []);
@@ -44,5 +49,5 @@ List<String> parseLinks(String body) {
 
   // A page the parser cannot take is shown as plain text, without links.
   walk(parseRenderable(body)?.nodes ?? const []);
-  return keys;
+  return targets;
 }

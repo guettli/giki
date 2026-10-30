@@ -2,12 +2,12 @@
 /// collection more than a pile of notes.
 library;
 
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:web/web.dart' as web;
 
 import '../db/attachments.dart';
+import '../db/clock.dart';
 
 import '../db/database.dart';
 import '../db/repository.dart';
@@ -16,12 +16,19 @@ import '../sync/api_client.dart';
 import '../wiki/markdown_view.dart';
 import '../wiki/snippet.dart';
 import '../wiki/wikilink.dart';
+import 'age.dart';
 import 'attachments_section.dart';
 import 'history_page.dart';
+import 'shortcut.dart';
 
 /// Lists the most recently edited nodes.
 class WikiPage extends StatefulWidget {
-  const WikiPage({required this.db, required this.nodes, super.key});
+  const WikiPage({
+    required this.db,
+    required this.nodes,
+    this.searchFocus,
+    super.key,
+  });
 
   /// The local database.
   final GikiDatabase db;
@@ -29,12 +36,18 @@ class WikiPage extends StatefulWidget {
   /// Node storage.
   final NodeRepository nodes;
 
+  /// Focus of the search field, for the app's Ctrl+K.
+  final FocusNode? searchFocus;
+
   @override
   State<WikiPage> createState() => _WikiPageState();
 }
 
 class _WikiPageState extends State<WikiPage> {
   final TextEditingController _query = TextEditingController();
+
+  /// Lists the pages that are linked to but missing, instead of the recent.
+  bool _wanted = false;
 
   @override
   void initState() {
@@ -70,6 +83,7 @@ class _WikiPageState extends State<WikiPage> {
               label: 'Search pages',
               child: TextField(
                 controller: _query,
+                focusNode: widget.searchFocus,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: 'Search pages',
@@ -85,7 +99,32 @@ class _WikiPageState extends State<WikiPage> {
               ),
             ),
           ),
-          Expanded(child: searching ? _results() : _recent()),
+          if (!searching)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                      value: false,
+                      label: Text('Recent'),
+                      icon: Icon(Icons.schedule)),
+                  ButtonSegment(
+                      value: true,
+                      label: Text('Wanted'),
+                      icon: Icon(Icons.add_link)),
+                ],
+                selected: {_wanted},
+                onSelectionChanged: (choice) =>
+                    setState(() => _wanted = choice.single),
+              ),
+            ),
+          Expanded(
+            child: searching
+                ? _results()
+                : _wanted
+                    ? _wantedPages()
+                    : _recent(),
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -98,6 +137,7 @@ class _WikiPageState extends State<WikiPage> {
 
   Widget _recent() {
     final recent = widget.nodes.recent();
+    final now = DateTime.now();
     if (recent.isEmpty) {
       return const Center(child: Text('No pages yet. Create one.'));
     }
@@ -107,8 +147,37 @@ class _WikiPageState extends State<WikiPage> {
         final node = recent[index];
         return ListTile(
           title: Text(node.title.isEmpty ? '(untitled)' : node.title),
-          subtitle: Text(node.updatedAt),
+          subtitle: Text(describeAge(parseClock(node.updatedAt), now)),
           onTap: () => _edit(node.id),
+        );
+      },
+    );
+  }
+
+  Widget _wantedPages() {
+    final wanted = widget.nodes.wanted();
+    if (wanted.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('No wanted pages. A [[link]] to a page that does not '
+              'exist yet shows up here.'),
+        ),
+      );
+    }
+    return ListView.builder(
+      itemCount: wanted.length,
+      itemBuilder: (context, index) {
+        final page = wanted[index];
+        final from = page.linkedFrom.map((t) => t.isEmpty ? '(untitled)' : t);
+        return ListTile(
+          leading: const Icon(Icons.add_circle_outline),
+          title: Text(page.title),
+          subtitle: Text('Linked from ${from.join(', ')}',
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          // As following the link does: the page is created, then opened.
+          onTap: () => _edit(widget.nodes.byTitle(page.title)?.id ??
+              widget.nodes.save(title: page.title, body: '')),
         );
       },
     );
@@ -224,7 +293,15 @@ class _NodeEditorState extends State<NodeEditor> {
     _savedBody = _body.text;
     widget.db.nodesRevision.addListener(_onNodesChanged);
     widget.db.attachmentsRevision.addListener(_onAttachmentsChanged);
+    HardwareKeyboard.instance.addHandler(_saveKey);
   }
+
+  /// Ctrl+S (Cmd+S on a Mac) saves, as in every editor; the browser's own
+  /// "save page as" would only download the app.
+  late final KeyEventCallback _saveKey =
+      controlShortcut(() => context, LogicalKeyboardKey.keyS, () {
+    _save();
+  });
 
   /// An attachment or its bytes arrived: an inline image may now be showable.
   void _onAttachmentsChanged() {
@@ -270,6 +347,7 @@ class _NodeEditorState extends State<NodeEditor> {
   void dispose() {
     widget.db.nodesRevision.removeListener(_onNodesChanged);
     widget.db.attachmentsRevision.removeListener(_onAttachmentsChanged);
+    HardwareKeyboard.instance.removeHandler(_saveKey);
     _title.dispose();
     _body.dispose();
     super.dispose();

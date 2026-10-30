@@ -2,12 +2,14 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../db/database.dart';
 import '../db/repository.dart';
 import '../sync/api_client.dart';
 import '../sync/sync_service.dart';
 import 'settings_page.dart';
+import 'shortcut.dart';
 import 'study_page.dart';
 import 'wiki_page.dart';
 
@@ -26,16 +28,22 @@ class _HomePageState extends State<HomePage> {
   int _tab = 0;
   SyncService? _sync;
   String _status = '';
+  final FocusNode _searchFocus = FocusNode(debugLabel: 'search pages');
+  late final KeyEventCallback _keys =
+      controlShortcut(() => context, LogicalKeyboardKey.keyK, _search);
 
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_keys);
     _configureSync();
   }
 
   @override
   void dispose() {
     _sync?.dispose();
+    HardwareKeyboard.instance.removeHandler(_keys);
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -89,6 +97,15 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// Ctrl+K (Cmd+K on a Mac) jumps to the page search, from either tab.
+  void _search() {
+    setState(() => _tab = 0);
+    // After the frame that shows the Wiki tab: a tab IndexedStack hides
+    // cannot take focus.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _searchFocus.requestFocus());
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -138,7 +155,11 @@ class _HomePageState extends State<HomePage> {
       body: IndexedStack(
         index: _tab,
         children: [
-          WikiPage(db: widget.db, nodes: NodeRepository(widget.db)),
+          WikiPage(
+            db: widget.db,
+            nodes: NodeRepository(widget.db),
+            searchFocus: _searchFocus,
+          ),
           StudyPage(
             db: widget.db,
             cards: CardRepository(widget.db),
