@@ -162,7 +162,11 @@ class _StudyPageState extends State<StudyPage> {
     if (sides == null) {
       return;
     }
-    if (page case (final node, final line)) {
+    if (page == null) {
+      widget.cards.save(id: card?.cardId, front: sides.$1, back: sides.$2);
+    } else if (_pageLine(card) case (final node, final line)) {
+      // Read again: a sync may have changed the page while the dialog was
+      // open, and writing the text from before it would undo that change.
       final body =
           editPageCardLine(node.body, line, front: sides.$1, back: sides.$2);
       if (body == null) {
@@ -172,7 +176,9 @@ class _StudyPageState extends State<StudyPage> {
       }
       widget.nodes.save(id: node.id, title: node.title, body: body);
     } else {
-      widget.cards.save(id: card?.cardId, front: sides.$1, back: sides.$2);
+      _tell('The card\'s line in "${page.$1.title}" changed meanwhile, on '
+          'another device. Nothing was saved.');
+      return;
     }
     if (mounted) {
       setState(() {});
@@ -204,15 +210,22 @@ class _StudyPageState extends State<StudyPage> {
     if (!(confirmed ?? false)) {
       return;
     }
-    if (page case (final node, final line)) {
-      // Removing the line deletes the card: the page and its cards change in
-      // one transaction.
-      widget.nodes.save(
-          id: node.id,
-          title: node.title,
-          body: editPageCardLine(node.body, line)!);
-    } else {
+    if (page == null) {
       widget.cards.delete(card.cardId);
+    } else if (_pageLine(card) case (final node, final line)) {
+      // Read again, as in _editCard. Removing the line deletes the card: the
+      // page and its cards change in one transaction.
+      final body = editPageCardLine(node.body, line);
+      if (body == null) {
+        _tell('"${node.title}" asks this question again further down, so '
+            'the card would stay. Open the page to remove both lines.');
+        return;
+      }
+      widget.nodes.save(id: node.id, title: node.title, body: body);
+    } else {
+      _tell('The card\'s line in "${page.$1.title}" changed meanwhile, on '
+          'another device. Nothing was deleted.');
+      return;
     }
     if (mounted) {
       setState(() {});

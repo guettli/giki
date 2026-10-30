@@ -211,5 +211,19 @@ void main() {
               front: 'Capital of Mali', back: 'C'),
           isNull);
     });
+
+    test('refuses edits that would change another card of the page', () {
+      const page = 'A :: 1\nB :: 2\nA :: repeat';
+      CardLineAt at(String q) => pageCardLine(page,
+          nodeId: nodeId, cardId: pageCardId(nodeId, cardKey(q)))!;
+      // B asked again further down: the two lines would be one card.
+      expect(editPageCardLine(page, at('A'), front: 'B', back: 'x'), isNull);
+      // Removing A would only hand card A to the repeat.
+      expect(editPageCardLine(page, at('A')), isNull);
+      // Removing B is fine: the lines below it just move up.
+      expect(editPageCardLine(page, at('B')), 'A :: 1\nA :: repeat');
+      expect(editPageCardLine(page, at('B'), front: 'C', back: '3'),
+          'A :: 1\nC :: 3\nA :: repeat');
+    });
   });
 }
