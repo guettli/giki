@@ -132,9 +132,12 @@ CREATE INDEX IF NOT EXISTS attachments_sha256 ON attachments (sha256);
 -- Derived, NOT synced
 -- ---------------------------------------------------------------------------
 
--- Wiki links extracted from nodes.body. Rebuilt locally whenever a body
--- changes, on both client and server, so it carries no sync columns and has no
--- outbox trigger. `target_node_id` is empty for a dangling link.
+-- Wiki links extracted from nodes.body. Rebuilt on the client whenever a body
+-- changes, by the Markdown parser that renders the page
+-- (client/lib/wiki/wikilink.dart), so it carries no sync columns and has no
+-- outbox trigger. The server has the table but does not maintain it: nothing
+-- there reads it, and rows older servers wrote are stale. `target_node_id` is
+-- empty for a dangling link.
 CREATE TABLE IF NOT EXISTS links (
     source_node_id  TEXT NOT NULL,
     target_title_key TEXT NOT NULL,

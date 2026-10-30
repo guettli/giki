@@ -198,14 +198,6 @@ func (s *Store) applyOne(ctx context.Context, tx *sql.Tx, actor Actor, m Mutatio
 	if err := upsert(ctx, tx, table, row); err != nil {
 		return res, err
 	}
-	if table.Name == "nodes" {
-		if body, ok := row["body"].(string); ok {
-			if err := rebuildLinks(ctx, tx, m.RecordID, body); err != nil {
-				return res, err
-			}
-		}
-	}
-
 	// The payload written to the ChangeLog is the normalized row, not the
 	// client's bytes: what the audit trail shows is what the database holds.
 	normalized, err := json.Marshal(row)
@@ -287,25 +279,6 @@ func upsert(ctx context.Context, tx *sql.Tx, table Table, row map[string]any) er
 		strings.Join(assignments, ", "))
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("upsert %s: %w", table.Name, err)
-	}
-	return nil
-}
-
-// rebuildLinks refreshes the derived link index for one node. links is local
-// to each database and carries no sync columns, so this is a plain rewrite.
-func rebuildLinks(ctx context.Context, tx *sql.Tx, nodeID, body string) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE source_node_id = ?`, nodeID); err != nil {
-		return fmt.Errorf("clear links of %s: %w", nodeID, err)
-	}
-	for _, key := range wikilink.Parse(body) {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO links (source_node_id, target_title_key, target_node_id)
-			VALUES (?, ?, COALESCE((SELECT id FROM nodes WHERE title_key = ? AND is_deleted = 0 LIMIT 1), ''))
-			ON CONFLICT (source_node_id, target_title_key) DO NOTHING`,
-			nodeID, key, key)
-		if err != nil {
-			return fmt.Errorf("link %s -> %s: %w", nodeID, key, err)
-		}
 	}
 	return nil
 }

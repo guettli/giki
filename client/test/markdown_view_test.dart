@@ -99,4 +99,47 @@ void main() {
     expect(find.textContaining('Image not available: x'), findsOneWidget);
     expect(find.textContaining('after'), findsOneWidget);
   });
+
+  // markdown 7.3.1 throws on a block that starts with "[" and ends with a
+  // backslash, and on some others. Page text comes from every device.
+  test('text the Markdown parser throws on is made renderable', () {
+    expect(() => parsePage(r'[C:\Temp\'), throwsA(anything),
+        reason: 'when markdown fixes this, drop the workaround');
+    expect(renderableMarkdown(r'[C:\Temp\'), r'[C:\Temp\ ');
+    expect(renderableMarkdown('ok\n\n[C:\\Temp\\\n\nmore'),
+        'ok\n\n[C:\\Temp\\ \n\nmore');
+    // A line break inside another paragraph stays.
+    expect(renderableMarkdown('one\\\ntwo\n\n[C:\\Temp\\'),
+        'one\\\ntwo\n\n[C:\\Temp\\ ');
+    // Text that parses is left alone, hard line breaks included.
+    expect(renderableMarkdown('line one\\\nline two'), 'line one\\\nline two');
+    expect(renderableMarkdown(r'[a]: <'), isNull);
+  });
+
+  Future<void> pumpPage(WidgetTester tester, String body) =>
+      tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: PageMarkdown(
+            body: body,
+            imageBytes: (_) => null,
+            onWikiLink: (_) {},
+            onExternalLink: (_) {},
+          ),
+        ),
+      ));
+
+  testWidgets('a page ending in "[C:\\Temp\\" still renders', (tester) async {
+    await pumpPage(tester, 'Backups go to **disk**:\n\n[C:\\Temp\\');
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('Backups go to'), findsOneWidget);
+    expect(find.textContaining('C:\\Temp\\'), findsOneWidget);
+  });
+
+  testWidgets('a page the parser cannot take is shown as plain text',
+      (tester) async {
+    await pumpPage(tester, 'Some **notes**\n\n[a]: <');
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('shown as plain text'), findsOneWidget);
+    expect(find.textContaining('Some **notes**'), findsOneWidget);
+  });
 }

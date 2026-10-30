@@ -1,16 +1,18 @@
-/// [[WikiLink]] parsing, mirroring internal/wikilink in the Go server.
+/// Which pages a page links to.
 ///
-/// The two implementations must agree, because the client derives its link
-/// index offline and the server derives the same index when a node arrives
-/// over sync. Both sides run the same table of cases: see
-/// test/wikilink_test.dart here and TestParse in
-/// internal/wikilink/wikilink_test.go on the server.
+/// The links are read from the same Markdown parse that renders the page
+/// (lib/wiki/markdown_parse.dart), so backlinks list exactly the pages that
+/// show a link: a [[link]] in code, in an HTML comment or after a backslash
+/// is shown as text, and is no backlink either. The server does not derive
+/// links; it only computes title_key, with internal/wikilink.NormalizeTitle.
 library;
 
-final RegExp _linkPattern = RegExp(r'\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]');
+import 'package:markdown/markdown.dart' as md;
+
+import 'markdown_parse.dart';
 
 /// Maps a human title to its title_key: trimmed, inner whitespace collapsed,
-/// lowercased.
+/// lowercased. Must match NormalizeTitle in internal/wikilink on the server.
 String normalizeTitle(String title) => title
     .trim()
     .split(RegExp(r'\s+'))
@@ -18,17 +20,29 @@ String normalizeTitle(String title) => title
     .join(' ')
     .toLowerCase();
 
-/// Returns the normalized title_keys referenced by [body], in first-seen order
-/// and without duplicates.
+/// Returns the normalized title_keys of the `[[links]]` that [body] shows, in
+/// first-seen order and without duplicates.
 List<String> parseLinks(String body) {
   final keys = <String>[];
   final seen = <String>{};
-  for (final match in _linkPattern.allMatches(body)) {
-    final key = normalizeTitle(match.group(1)!);
-    if (key.isEmpty || !seen.add(key)) {
-      continue;
+  void walk(List<md.Node> nodes) {
+    for (final node in nodes) {
+      if (node is! md.Element) {
+        continue;
+      }
+      final target =
+          node.tag == 'a' ? wikiLinkTarget(node.attributes['href']) : null;
+      if (target != null) {
+        final key = normalizeTitle(target);
+        if (key.isNotEmpty && seen.add(key)) {
+          keys.add(key);
+        }
+      }
+      walk(node.children ?? const []);
     }
-    keys.add(key);
   }
+
+  // A page the parser cannot take is shown as plain text, without links.
+  walk(parseRenderable(body)?.nodes ?? const []);
   return keys;
 }

@@ -52,7 +52,7 @@ would push those rows straight back to the server. Two defences:
 | Table | Synced | Notes |
 | --- | --- | --- |
 | `users`, `nodes`, `cards`, `srs_state`, `review_log` | yes | UUIDv7 ids, `updated_at`, `is_deleted`. No foreign keys: a delta batch may legitimately deliver a card before its node. |
-| `links` | no | Derived from `nodes.body` by both sides. Rebuilt on every write, so it carries no sync columns. |
+| `links` | no | Derived from `nodes.body` on the client, by the Markdown parser that renders the page, so backlinks list exactly the pages that show a link. Rebuilt on every write, so it carries no sync columns. The server does not maintain its copy. |
 | `sync_outbox`, `sync_mute`, `sync_meta` | no | Client only. |
 | `change_log`, `devices` | no | Server only. `change_log.seq` is the sync cursor *and* the audit trail. |
 | `passkey_users`, `passkeys`, `passkey_ceremonies`, `api_sessions` | no | Server only. Public keys are not secret, but they are not the user's knowledge base either, and the sync protocol exists to replicate the latter. Keeping them out of the registry means a client cannot push a row into them. |

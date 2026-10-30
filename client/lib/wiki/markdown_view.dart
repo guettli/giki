@@ -8,54 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
-/// The URL scheme a `[[wiki link]]` is rendered with. Never leaves the app.
-const String wikiLinkScheme = 'giki-page';
+import 'markdown_parse.dart';
 
-/// Turns `[[Title]]` and `[[Title|label]]` into links to [wikiLinkScheme].
-///
-/// The same shape as the link index's pattern (lib/wiki/wikilink.dart). It is
-/// an inline syntax, so a `[[link]]` inside a code span or block stays text --
-/// unlike the index, which still counts it as a backlink.
-class WikiLinkSyntax extends md.InlineSyntax {
-  WikiLinkSyntax() : super(r'\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]');
-
-  @override
-  bool onMatch(md.InlineParser parser, Match match) {
-    final target = match[1]!.trim();
-    final label = (match[2] ?? '').trim();
-    if (target.isEmpty) {
-      // `[[ |label]]` points nowhere; following it would create an untitled
-      // page on every tap.
-      parser.addNode(md.Text(match[0]!));
-      return true;
-    }
-    final link = md.Element.text('a', label.isEmpty ? target : label)
-      ..attributes['href'] = '$wikiLinkScheme:${Uri.encodeComponent(target)}';
-    parser.addNode(link);
-    return true;
-  }
-}
-
-/// The page title a [wikiLinkScheme] href points at, or null for any other
-/// link.
-String? wikiLinkTarget(String? href) {
-  if (href == null || !href.startsWith('$wikiLinkScheme:')) {
-    return null;
-  }
-  return _decode(href.substring(wikiLinkScheme.length + 1));
-}
-
-/// Percent-decodes [text], or returns null when it is not valid. Page text
-/// comes from every device: `%FF` must not take a page down for everyone.
-String? _decode(String text) {
-  try {
-    return Uri.decodeComponent(text);
-  } on ArgumentError {
-    return null;
-  } on FormatException {
-    return null;
-  }
-}
+export 'markdown_parse.dart';
 
 /// Links that may leave the app. Anything else -- javascript:, data:, a
 /// relative path -- is not followed: page text comes from every device of
@@ -102,11 +57,25 @@ class PageMarkdown extends StatelessWidget {
         style: TextStyle(color: Theme.of(context).hintColor),
       );
     }
+    final source = _renderable(body);
+    if (source == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'This page cannot be formatted, so it is shown as plain text.',
+            style: TextStyle(color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 8),
+          SelectableText(body),
+        ],
+      );
+    }
     // SelectionArea rather than `selectable: true`: that renders editable
     // text fields, in which a link is no longer a plain tap target.
     return SelectionArea(
       child: MarkdownBody(
-        data: body,
+        data: source,
         inlineSyntaxes: [WikiLinkSyntax()],
         extensionSet: md.ExtensionSet.gitHubFlavored,
         onTapLink: (text, href, title) {
@@ -122,13 +91,26 @@ class PageMarkdown extends StatelessWidget {
     );
   }
 
+  // build runs on every rebuild of the editor, and renderableMarkdown parses
+  // the page once more; remember the last answer.
+  static String? _lastBody;
+  static String? _lastSource;
+
+  static String? _renderable(String body) {
+    if (body != _lastBody) {
+      _lastSource = renderableMarkdown(body);
+      _lastBody = body;
+    }
+    return _lastSource;
+  }
+
   Widget _image(BuildContext context, Uri uri, String? alt) {
     final label = (alt ?? '').isEmpty ? uri.toString() : alt!;
     if (uri.hasScheme) {
       return _placeholder(
           context, Icons.public_off, 'Remote image not loaded: $label');
     }
-    final filename = _decode(uri.path);
+    final filename = percentDecode(uri.path);
     final bytes = filename == null ? null : imageBytes(filename);
     if (bytes == null) {
       return _placeholder(
