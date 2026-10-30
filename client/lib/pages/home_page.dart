@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../db/database.dart';
 import '../db/repository.dart';
@@ -26,6 +27,7 @@ class _HomePageState extends State<HomePage> {
   int _tab = 0;
   SyncService? _sync;
   String _status = '';
+  final FocusNode _searchFocus = FocusNode(debugLabel: 'search pages');
 
   @override
   void initState() {
@@ -36,6 +38,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _sync?.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -89,8 +92,25 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// Ctrl+K (Cmd+K on a Mac) jumps to the page search, from anywhere.
+  void _search() {
+    setState(() => _tab = 0);
+    _searchFocus.requestFocus();
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+              _search,
+          const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _search,
+        },
+        // Shortcuts reach only focused widgets and their ancestors: before
+        // anything is focused, this is.
+        child: Focus(autofocus: true, child: _page(context)),
+      );
+
+  Widget _page(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('giki'),
@@ -138,7 +158,11 @@ class _HomePageState extends State<HomePage> {
       body: IndexedStack(
         index: _tab,
         children: [
-          WikiPage(db: widget.db, nodes: NodeRepository(widget.db)),
+          WikiPage(
+            db: widget.db,
+            nodes: NodeRepository(widget.db),
+            searchFocus: _searchFocus,
+          ),
           StudyPage(
             db: widget.db,
             cards: CardRepository(widget.db),

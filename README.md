@@ -23,7 +23,9 @@ still needs a web worker (see [docs/architecture.md](docs/architecture.md)).
 * **Wiki-style linking.** Write `[[Another Page]]` anywhere. Links resolve by
   title, so you can link to a page that does not exist yet -- following the
   link creates it. Every page shows its backlinks, which is how context
-  accumulates without anyone maintaining it.
+  accumulates without anyone maintaining it, and the **Wanted** list shows
+  the pages that are linked to but not written yet. Ctrl+K searches, Ctrl+S
+  saves.
 * **Spaced repetition.** Flashcards on a Leitner box ladder. Write a card
   right where the knowledge lives -- a line `Question :: Answer` in any page
   becomes a card, and editing or removing the line updates or removes it.

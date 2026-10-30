@@ -26,6 +26,17 @@ class NodeSummary {
   final String updatedAt;
 }
 
+/// A page that pages link to but that does not exist yet.
+class WantedPage {
+  const WantedPage({required this.title, required this.linkedFrom});
+
+  /// The title as one of the linking pages writes it.
+  final String title;
+
+  /// The titles of the pages that link to it.
+  final List<String> linkedFrom;
+}
+
 /// A full node.
 class Node {
   const Node({
@@ -224,6 +235,41 @@ class NodeRepository {
           updatedAt: row['updated_at'] as String,
         ),
     ];
+  }
+
+  /// The pages that are linked to but do not exist, most wanted first --
+  /// the wiki's to-do list.
+  List<WantedPage> wanted() {
+    final rows = _db.raw.select(
+      'SELECT l.target_title_key AS key, s.title, s.body FROM links l '
+      'JOIN nodes s ON s.id = l.source_node_id AND s.is_deleted = 0 '
+      'WHERE NOT EXISTS (SELECT 1 FROM nodes n '
+      '  WHERE n.title_key = l.target_title_key AND n.is_deleted = 0) '
+      'ORDER BY l.target_title_key, s.updated_at DESC',
+    );
+    final titles = <String, String>{};
+    final from = <String, List<String>>{};
+    for (final row in rows) {
+      final key = row['key'] as String;
+      (from[key] ??= []).add(row['title'] as String);
+      // links keeps only the normalized key; the linking pages have the
+      // capitalisation their authors chose. Any is better than none.
+      if (titles[key] == null || titles[key] == key) {
+        titles[key] = linkTargets(row['body'] as String).firstWhere(
+            (target) => normalizeTitle(target) == key,
+            orElse: () => key);
+      }
+    }
+    final wanted = [
+      for (final MapEntry(:key, :value) in from.entries)
+        WantedPage(title: titles[key]!, linkedFrom: value),
+    ]..sort((a, b) {
+        final byCount = b.linkedFrom.length.compareTo(a.linkedFrom.length);
+        return byCount != 0
+            ? byCount
+            : a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      });
+    return wanted;
   }
 
   /// The title_keys that node [id] links to, as last saved.
