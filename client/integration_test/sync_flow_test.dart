@@ -1461,7 +1461,12 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: WikiPage(db: db, nodes: nodes)));
     await tester.tap(find.text('Wanted'));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Zanzibar Notes'), 200);
+    // The list, not the search field, which scrolls too.
+    await tester.scrollUntilVisible(find.text('Zanzibar Notes'), 200,
+        scrollable: find
+            .descendant(
+                of: find.byType(ListView), matching: find.byType(Scrollable))
+            .first);
     await tester.tap(find.text('Zanzibar Notes'));
     await tester.pumpAndSettle();
     expect(nodes.byTitle('zanzibar notes')?.title, 'Zanzibar Notes',

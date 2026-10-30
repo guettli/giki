@@ -625,7 +625,8 @@ class _NodeEditorState extends State<NodeEditor> {
           },
         },
         // Somewhere to hold focus in Read mode, where there is no text field.
-        child: Focus(autofocus: true, child: _page(context)),
+        child:
+            Focus(autofocus: true, skipTraversal: true, child: _page(context)),
       );
 
   Widget _page(BuildContext context) {

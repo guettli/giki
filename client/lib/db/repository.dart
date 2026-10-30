@@ -241,7 +241,8 @@ class NodeRepository {
   /// the wiki's to-do list.
   List<WantedPage> wanted() {
     final rows = _db.raw.select(
-      'SELECT l.target_title_key AS key, s.title, s.body FROM links l '
+      'SELECT l.target_title_key AS key, s.id AS source, s.title, s.body '
+      'FROM links l '
       'JOIN nodes s ON s.id = l.source_node_id AND s.is_deleted = 0 '
       'WHERE NOT EXISTS (SELECT 1 FROM nodes n '
       '  WHERE n.title_key = l.target_title_key AND n.is_deleted = 0) '
@@ -249,15 +250,19 @@ class NodeRepository {
     );
     final titles = <String, String>{};
     final from = <String, List<String>>{};
+    // One parse per linking page, however many missing pages it links to.
+    final targetsOf = <String, List<String>>{};
     for (final row in rows) {
       final key = row['key'] as String;
       (from[key] ??= []).add(row['title'] as String);
       // links keeps only the normalized key; the linking pages have the
       // capitalisation their authors chose. Any is better than none.
       if (titles[key] == null || titles[key] == key) {
-        titles[key] = linkTargets(row['body'] as String).firstWhere(
-            (target) => normalizeTitle(target) == key,
-            orElse: () => key);
+        titles[key] = targetsOf
+            .putIfAbsent(row['source'] as String,
+                () => linkTargets(row['body'] as String))
+            .firstWhere((target) => normalizeTitle(target) == key,
+                orElse: () => key);
       }
     }
     final wanted = [

@@ -92,10 +92,13 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// Ctrl+K (Cmd+K on a Mac) jumps to the page search, from anywhere.
+  /// Ctrl+K (Cmd+K on a Mac) jumps to the page search, from either tab.
   void _search() {
     setState(() => _tab = 0);
-    _searchFocus.requestFocus();
+    // After the frame that shows the Wiki tab: a tab IndexedStack hides
+    // cannot take focus.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _searchFocus.requestFocus());
   }
 
   @override
@@ -107,7 +110,8 @@ class _HomePageState extends State<HomePage> {
         },
         // Shortcuts reach only focused widgets and their ancestors: before
         // anything is focused, this is.
-        child: Focus(autofocus: true, child: _page(context)),
+        child:
+            Focus(autofocus: true, skipTraversal: true, child: _page(context)),
       );
 
   Widget _page(BuildContext context) {
