@@ -1006,7 +1006,8 @@ void main() {
     cards.save(front: 'Capital of France?', back: 'Paris');
     cards.save(front: 'Capital of Peru?', back: 'Lima');
     Widget study() => MaterialApp(
-          home: StudyPage(key: const ValueKey('study'), db: db, cards: cards),
+          home: StudyPage(
+              key: const ValueKey('study'), db: db, cards: cards, nodes: nodes),
         );
     await tester.pumpWidget(study());
     await tester.tap(find.text('Show answer'));
@@ -1070,7 +1071,7 @@ void main() {
         reason: 'the deletion was not queued for sync');
 
     await tester.pumpWidget(MaterialApp(
-      home: StudyPage(db: db, cards: cards),
+      home: StudyPage(db: db, cards: cards, nodes: nodes),
     ));
     await tester.tap(find.byTooltip('New card'));
     await tester.pumpAndSettle();
@@ -1085,6 +1086,54 @@ void main() {
     expect(tester.widget<FilledButton>(create).onPressed, isNotNull);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
+  });
+
+  // A card written in a page used to be edited as a row of its own on the
+  // Study page, and the next edit of its line in the page undid that.
+  testWidgets('a card from a page is edited and deleted through its line',
+      (tester) async {
+    final cards = CardRepository(db);
+    final id = nodes.save(
+      title: 'Africa',
+      body: 'Capitals:\n\n- Capital of Niger :: Niamey\n'
+          '- Capital of Togo :: Lome\n',
+    );
+    final cardId = pageCardId(id, 'capital of niger');
+    DueCard niger() =>
+        cards.due(limit: 1000).firstWhere((c) => c.cardId == cardId);
+    // Answered long ago, so due before every other card in this database.
+    cards.review(niger(), Rating.good, at: DateTime.utc(2000));
+
+    await tester.pumpWidget(MaterialApp(
+      home: StudyPage(db: db, cards: cards, nodes: nodes),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Capital of Niger'), findsOneWidget);
+    expect(find.text('From "Africa"'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Edit card'));
+    await tester.pumpAndSettle();
+    expect(
+        find.textContaining('Saved to its line in "Africa"'), findsOneWidget);
+    await tester.enterText(
+        find.byType(TextField).at(1), 'Niamey, on the Niger');
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+    expect(nodes.byId(id)!.body,
+        contains('- Capital of Niger :: Niamey, on the Niger\n'),
+        reason: 'the page does not say what the card says');
+    expect(niger().back, 'Niamey, on the Niger');
+    expect(niger().state.reps, 1, reason: 'the edit lost the schedule');
+
+    await tester.tap(find.byTooltip('Delete card'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('its line in "Africa"'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+    final body = nodes.byId(id)!.body;
+    expect(body, isNot(contains('Niger')));
+    expect(body, contains('- Capital of Togo :: Lome'));
+    expect(cards.due(limit: 1000).where((c) => c.cardId == cardId), isEmpty);
   });
 
   testWidgets('text fields have an accessible name', (tester) async {

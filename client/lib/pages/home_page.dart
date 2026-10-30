@@ -139,7 +139,11 @@ class _HomePageState extends State<HomePage> {
         index: _tab,
         children: [
           WikiPage(db: widget.db, nodes: NodeRepository(widget.db)),
-          StudyPage(db: widget.db, cards: CardRepository(widget.db)),
+          StudyPage(
+            db: widget.db,
+            cards: CardRepository(widget.db),
+            nodes: NodeRepository(widget.db),
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(

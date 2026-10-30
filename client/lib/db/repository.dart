@@ -207,12 +207,20 @@ class DueCard {
     required this.front,
     required this.back,
     required this.state,
+    this.nodeId = '',
+    this.pageTitle,
   });
 
   final String cardId;
   final String front;
   final String back;
   final ReviewState state;
+
+  /// The page the card belongs to; empty for a card made on the Study page.
+  final String nodeId;
+
+  /// That page's title, or null when there is no such page (any more).
+  final String? pageTitle;
 }
 
 /// Reads and writes flashcards and their scheduling state.
@@ -258,9 +266,10 @@ class CardRepository {
   List<DueCard> due({DateTime? at, int limit = 50}) {
     final deadline = formatClock(at ?? DateTime.now());
     final rows = _db.raw.select(
-      'SELECT c.id AS card_id, c.front, c.back, '
+      'SELECT c.id AS card_id, c.front, c.back, c.node_id, n.title AS page_title, '
       '       s.box, s.interval_days, s.reps, s.lapses, s.due_at '
       'FROM cards c '
+      "LEFT JOIN nodes n ON n.id = c.node_id AND c.node_id != '' AND n.is_deleted = 0 "
       // The newest schedule only. Normally there is exactly one per card and
       // user, but a duplicate can still arrive from a device running an older
       // version; joining every row would offer the card once per schedule,
@@ -279,6 +288,8 @@ class CardRepository {
           cardId: row['card_id'] as String,
           front: row['front'] as String,
           back: row['back'] as String,
+          nodeId: row['node_id'] as String,
+          pageTitle: row['page_title'] as String?,
           state: row['due_at'] == null
               ? ReviewState.fresh(at ?? DateTime.now())
               : ReviewState(

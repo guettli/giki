@@ -30,11 +30,30 @@ final RegExp _fence = RegExp(r'^(`{3,}|~{3,})(.*)$');
 /// inside an inline `code span`. Both sides must be non-empty, and a question that
 /// appears twice counts once, first one wins: the question is what
 /// identifies a card (see [cardKey]).
-List<CardLine> parseCardLines(String body) {
-  final cards = <CardLine>[];
+List<CardLine> parseCardLines(String body) =>
+    [for (final at in cardLinesAt(body)) at.card];
+
+/// A card line and where it is in the page text.
+class CardLineAt {
+  const CardLineAt(this.card, this.lineIndex, this.prefix);
+
+  final CardLine card;
+
+  /// The index of the line in `body.split('\n')`.
+  final int lineIndex;
+
+  /// What precedes the question on that line: indentation and list marker.
+  final String prefix;
+}
+
+/// The cards of [parseCardLines], with the lines that write them.
+List<CardLineAt> cardLinesAt(String body) {
+  final cards = <CardLineAt>[];
   final seen = <String>{};
   String? fence;
-  for (final raw in body.split('\n')) {
+  final lines = body.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    final raw = lines[i];
     final line = raw.trim();
     final opening = _fence.firstMatch(line);
     if (fence != null) {
@@ -58,12 +77,15 @@ List<CardLine> parseCardLines(String body) {
     if (at < 0 || '`'.allMatches(line.substring(0, at)).length.isOdd) {
       continue;
     }
-    final front = line.substring(0, at).replaceFirst(_listMarker, '').trim();
+    final question = line.substring(0, at);
+    final marker = _listMarker.matchAsPrefix(question)?.group(0) ?? '';
+    final front = question.substring(marker.length).trim();
     final back = line.substring(at + 4).trim();
     if (front.isEmpty || back.isEmpty || !seen.add(cardKey(front))) {
       continue;
     }
-    cards.add(CardLine(front, back));
+    final indent = raw.substring(0, raw.length - raw.trimLeft().length);
+    cards.add(CardLineAt(CardLine(front, back), i, indent + marker));
   }
   return cards;
 }

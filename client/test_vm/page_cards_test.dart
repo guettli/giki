@@ -158,4 +158,58 @@ void main() {
       expect(live(), ['A :: 1']);
     });
   });
+
+  group('editing a card through its line', () {
+    const nodeId = 'page-1';
+    const body = 'Notes\n\n'
+        '- [ ] Capital of Mali :: Bamako\r\n'
+        '  1. Capital of Chad :: N\'Djamena\n'
+        '```\nCapital of Mali :: not a card\n```\n'
+        'Capital of Chad :: a repeat, not the card';
+    String idOf(String question) => pageCardId(nodeId, cardKey(question));
+    CardLineAt lineOf(String question) =>
+        pageCardLine(body, nodeId: nodeId, cardId: idOf(question))!;
+
+    test('finds the line that writes a card, not a repeat or code', () {
+      expect(lineOf('Capital of Chad').lineIndex, 3);
+      expect(lineOf('capital  of mali').prefix, '- [ ] ');
+      expect(pageCardLine(body, nodeId: nodeId, cardId: 'hand-made'), isNull);
+      expect(
+          pageCardLine(body,
+              nodeId: 'other-page', cardId: idOf('Capital of Mali')),
+          isNull);
+    });
+
+    test('rewrites the answer and keeps indentation, marker and line ending',
+        () {
+      final edited = editPageCardLine(body, lineOf('Capital of Mali'),
+          front: 'Capital of Mali', back: 'Bamako (since 1960)')!;
+      expect(edited.split('\n')[2],
+          '- [ ] Capital of Mali :: Bamako (since 1960)\r');
+      final chad = editPageCardLine(body, lineOf('Capital of Chad'),
+          front: 'Capital of Chad', back: 'Ndjamena')!;
+      expect(chad.split('\n')[3], '  1. Capital of Chad :: Ndjamena');
+      expect(parseCardLines(chad),
+          contains(const CardLine('Capital of Chad', 'Ndjamena')));
+    });
+
+    test('removes the line', () {
+      final edited = editPageCardLine(body, lineOf('Capital of Mali'))!;
+      expect(edited, isNot(contains('Bamako')));
+      expect(edited.split('\n').length, body.split('\n').length - 1);
+    });
+
+    test('refuses text that would not read back as the card', () {
+      final mali = lineOf('Capital of Mali');
+      expect(editPageCardLine(body, mali, front: 'A :: B', back: 'C'), isNull);
+      expect(
+          editPageCardLine(body, mali, front: 'two\nlines', back: 'C'), isNull);
+      expect(editPageCardLine(body, mali, front: '`odd', back: 'C'), isNull);
+      // Asked further up already: the edited line would be the repeat.
+      expect(
+          editPageCardLine(body, lineOf('Capital of Chad'),
+              front: 'Capital of Mali', back: 'C'),
+          isNull);
+    });
+  });
 }

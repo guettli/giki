@@ -95,3 +95,43 @@ PageCardChanges syncPageCards(
   }
   return PageCardChanges(created: created, updated: updated, deleted: deleted);
 }
+
+/// The line of [body] that writes card [cardId] of page [nodeId], or null
+/// when there is none: the card was made by hand, or its line is gone.
+CardLineAt? pageCardLine(String body,
+    {required String nodeId, required String cardId}) {
+  for (final at in cardLinesAt(body)) {
+    if (pageCardId(nodeId, cardKey(at.card.front)) == cardId) {
+      return at;
+    }
+  }
+  return null;
+}
+
+/// [body] with [line] changed to `front :: back`, or removed when [front] is
+/// null. Null when the new line would not read back as that card: a question
+/// already asked further up the page, or text that does not fit on one card
+/// line.
+///
+/// This is how the Study page edits a card from a page: through its line,
+/// which is what the card is derived from. Writing the card row alone would
+/// be undone the next time someone edits that line.
+String? editPageCardLine(String body, CardLineAt line,
+    {String? front, String back = ''}) {
+  final lines = body.split('\n');
+  if (front == null) {
+    lines.removeAt(line.lineIndex);
+    return lines.join('\n');
+  }
+  final ending = lines[line.lineIndex].endsWith('\r') ? '\r' : '';
+  lines[line.lineIndex] = '${line.prefix}$front :: $back$ending';
+  final edited = lines.join('\n');
+  final readBack = [
+    for (final at in cardLinesAt(edited))
+      if (at.lineIndex == line.lineIndex) at.card,
+  ];
+  return readBack.length == 1 &&
+          readBack.single == CardLine(front.trim(), back.trim())
+      ? edited
+      : null;
+}
