@@ -11,6 +11,7 @@ import '../db/attachments.dart';
 
 import '../db/database.dart';
 import '../db/repository.dart';
+import '../srs/card_text.dart';
 import '../sync/api_client.dart';
 import '../wiki/markdown_view.dart';
 import '../wiki/snippet.dart';
@@ -394,6 +395,57 @@ class _NodeEditorState extends State<NodeEditor> {
     return choice ?? false;
   }
 
+  /// Deletes [node] after asking, and offers to undo it.
+  ///
+  /// A deleted page is a tombstone that syncs to every device, and it takes
+  /// the cards its lines wrote with it. Undo saves the page again as it was
+  /// stored, which writes those cards back -- with their review schedules,
+  /// which a deletion leaves alone.
+  Future<void> _delete(Node shown) async {
+    // What is stored, which a delta may have changed since the page opened.
+    final node = widget.nodes.byId(shown.id) ?? shown;
+    final cards = parseCardLines(node.body).length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete "${node.title}"?'),
+        content: Text([
+          'The page is deleted on all your devices.',
+          if (cards == 1) 'Its flashcard is deleted with it.',
+          if (cards > 1) 'Its $cards flashcards are deleted with it.',
+          if (_dirty) 'Your unsaved changes are discarded.',
+        ].join(' ')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+    final nodes = widget.nodes;
+    // This page is about to close; the snack bar lives on in the app's
+    // messenger, below whichever page is shown next.
+    final messenger = ScaffoldMessenger.of(context);
+    nodes.delete(node.id);
+    Navigator.of(context).pop();
+    messenger.showSnackBar(SnackBar(
+      content: Text('Deleted "${node.title}"'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () =>
+            nodes.save(id: node.id, title: node.title, body: node.body),
+      ),
+    ));
+  }
+
   Future<bool> _confirmLeave() async {
     final choice = await showDialog<bool>(
       context: context,
@@ -509,10 +561,7 @@ class _NodeEditorState extends State<NodeEditor> {
             IconButton(
               tooltip: 'Delete',
               icon: const Icon(Icons.delete_outline),
-              onPressed: () {
-                widget.nodes.delete(node.id);
-                Navigator.of(context).pop();
-              },
+              onPressed: () => _delete(node),
             ),
           IconButton(
               tooltip: 'Save', icon: const Icon(Icons.check), onPressed: _save),

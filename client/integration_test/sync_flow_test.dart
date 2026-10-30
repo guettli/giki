@@ -1388,6 +1388,50 @@ void main() {
         due().where((c) => c.startsWith('Capital of Burkina Faso')), isEmpty);
   });
 
+  testWidgets('deleting a page asks first and can be undone', (tester) async {
+    final cards = CardRepository(db);
+    bool hasCard() =>
+        cards.due(limit: 1000).any((c) => c.front == 'Capital of Mali');
+    final id = nodes.save(title: 'Doomed', body: 'Capital of Mali :: Bamako');
+
+    // The editor is pushed from somewhere, as in the app: deleting pops it.
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => NodeEditor(db: db, nodes: nodes, nodeId: id))),
+            child: const Text('Open the page'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('Open the page'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Its flashcard is deleted with it'),
+        findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(nodes.byId(id), isNotNull, reason: 'Cancel deleted the page');
+
+    await tester.tap(find.byTooltip('Delete'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+    expect(nodes.byId(id), isNull);
+    expect(hasCard(), isFalse);
+    expect(find.text('Open the page'), findsOneWidget);
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(nodes.byId(id)?.body, 'Capital of Mali :: Bamako',
+        reason: 'Undo did not bring the page back');
+    expect(hasCard(), isTrue, reason: 'Undo did not bring the card back');
+  });
+
   testWidgets('the app shell builds against the real local database', (
     tester,
   ) async {
