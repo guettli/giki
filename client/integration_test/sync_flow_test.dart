@@ -1514,7 +1514,12 @@ void main() {
     // added enough pages to push it below the fold.
     await tester.enterText(find.byType(TextField), 'Spaced Repetition');
     await tester.pumpAndSettle();
-    expect(find.text('Spaced Repetition'), findsWidgets);
+    expect(find.text('Spaced Repetition'), findsWidgets,
+        reason: 'field: '
+            '"${tester.widget<TextField>(find.byType(TextField)).controller?.text}", '
+            'page: ${nodes.byTitle('spaced repetition')?.id}, '
+            'hits: ${nodes.search('Spaced Repetition').map((h) => h.title).toList()}, '
+            'focus: ${FocusManager.instance.primaryFocus}');
   });
 }
 
