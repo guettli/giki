@@ -1475,6 +1475,28 @@ void main() {
         nodes.wanted().map((p) => p.title), isNot(contains('Zanzibar Notes')));
   });
 
+  testWidgets('the app shell builds against the real local database', (
+    tester,
+  ) async {
+    await tester.pumpWidget(GikiApp(db: db));
+    await tester.pumpAndSettle();
+
+    expect(find.text('giki'), findsOneWidget);
+    expect(find.text('Wiki'), findsOneWidget);
+    expect(find.text('Study'), findsOneWidget);
+    // The page that survived the earlier phases is there. Found through the
+    // search field: the list is built lazily, and the earlier phases have
+    // added enough pages to push it below the fold.
+    await tester.enterText(find.byType(TextField), 'Spaced Repetition');
+    await tester.pumpAndSettle();
+    expect(find.text('Spaced Repetition'), findsWidgets,
+        reason: 'field: '
+            '"${tester.widget<TextField>(find.byType(TextField)).controller?.text}", '
+            'page: ${nodes.byTitle('spaced repetition')?.id}, '
+            'hits: ${nodes.search('Spaced Repetition').map((h) => h.title).toList()}, '
+            'focus: ${FocusManager.instance.primaryFocus}');
+  });
+
   testWidgets('Ctrl+K jumps to the search, Ctrl+S saves', (tester) async {
     Future<void> press(LogicalKeyboardKey key) async {
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
@@ -1498,28 +1520,6 @@ void main() {
     await tester.enterText(find.byType(TextField).at(1), 'after');
     await press(LogicalKeyboardKey.keyS);
     expect(nodes.byId(id)!.body, 'after', reason: 'Ctrl+S did not save');
-  });
-
-  testWidgets('the app shell builds against the real local database', (
-    tester,
-  ) async {
-    await tester.pumpWidget(GikiApp(db: db));
-    await tester.pumpAndSettle();
-
-    expect(find.text('giki'), findsOneWidget);
-    expect(find.text('Wiki'), findsOneWidget);
-    expect(find.text('Study'), findsOneWidget);
-    // The page that survived the earlier phases is there. Found through the
-    // search field: the list is built lazily, and the earlier phases have
-    // added enough pages to push it below the fold.
-    await tester.enterText(find.byType(TextField), 'Spaced Repetition');
-    await tester.pumpAndSettle();
-    expect(find.text('Spaced Repetition'), findsWidgets,
-        reason: 'field: '
-            '"${tester.widget<TextField>(find.byType(TextField)).controller?.text}", '
-            'page: ${nodes.byTitle('spaced repetition')?.id}, '
-            'hits: ${nodes.search('Spaced Repetition').map((h) => h.title).toList()}, '
-            'focus: ${FocusManager.instance.primaryFocus}');
   });
 }
 
