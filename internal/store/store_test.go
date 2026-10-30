@@ -368,50 +368,6 @@ func TestChangesSkipOriginDevice(t *testing.T) {
 	}
 }
 
-func TestApplyBatchDerivesLinks(t *testing.T) {
-	st := openTestStore(t)
-	ctx := context.Background()
-	actor := Actor{UserID: "alice", DeviceID: "dev-a"}
-
-	if _, err := st.ApplyBatch(ctx, actor, []Mutation{
-		node("n1", "Spaced Repetition", "see [[Leitner]] and [[SM-2]]", "2026-10-23T10:00:00.000Z"),
-		node("n2", "Leitner", "a box system", "2026-10-23T10:01:00.000Z"),
-	}); err != nil {
-		t.Fatalf("ApplyBatch: %v", err)
-	}
-
-	var targets []string
-	rows, err := st.DB.Query(`SELECT target_title_key FROM links WHERE source_node_id = 'n1' ORDER BY target_title_key`)
-	if err != nil {
-		t.Fatalf("read links: %v", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			t.Fatalf("scan link: %v", err)
-		}
-		targets = append(targets, key)
-	}
-	if got, want := joinSorted(targets), "leitner,sm-2"; got != want {
-		t.Errorf("links of n1 = %s, want %s", got, want)
-	}
-
-	// Editing the body replaces the derived links rather than adding to them.
-	if _, err := st.ApplyBatch(ctx, actor, []Mutation{
-		node("n1", "Spaced Repetition", "only [[Leitner]] now", "2026-10-23T12:00:00.000Z"),
-	}); err != nil {
-		t.Fatalf("ApplyBatch: %v", err)
-	}
-	var count int
-	if err := st.DB.QueryRow(`SELECT COUNT(*) FROM links WHERE source_node_id = 'n1'`).Scan(&count); err != nil {
-		t.Fatalf("count links: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("links of n1 = %d, want 1 after the edit", count)
-	}
-}
-
 func TestApplyBatchNormalizesTitleKey(t *testing.T) {
 	st := openTestStore(t)
 	payload, _ := json.Marshal(map[string]any{

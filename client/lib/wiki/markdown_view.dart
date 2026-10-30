@@ -2,61 +2,15 @@
 /// page's own attachments.
 library;
 
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
-/// The URL scheme a `[[wiki link]]` is rendered with. Never leaves the app.
-const String wikiLinkScheme = 'giki-page';
+import 'markdown_parse.dart';
 
-/// Turns `[[Title]]` and `[[Title|label]]` into links to [wikiLinkScheme].
-///
-/// The same shape as the link index's pattern (lib/wiki/wikilink.dart). It is
-/// an inline syntax, so a `[[link]]` inside a code span or block stays text --
-/// unlike the index, which still counts it as a backlink.
-class WikiLinkSyntax extends md.InlineSyntax {
-  WikiLinkSyntax() : super(r'\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]');
-
-  @override
-  bool onMatch(md.InlineParser parser, Match match) {
-    final target = match[1]!.trim();
-    final label = (match[2] ?? '').trim();
-    if (target.isEmpty) {
-      // `[[ |label]]` points nowhere; following it would create an untitled
-      // page on every tap.
-      parser.addNode(md.Text(match[0]!));
-      return true;
-    }
-    final link = md.Element.text('a', label.isEmpty ? target : label)
-      ..attributes['href'] = '$wikiLinkScheme:${Uri.encodeComponent(target)}';
-    parser.addNode(link);
-    return true;
-  }
-}
-
-/// The page title a [wikiLinkScheme] href points at, or null for any other
-/// link.
-String? wikiLinkTarget(String? href) {
-  if (href == null || !href.startsWith('$wikiLinkScheme:')) {
-    return null;
-  }
-  return _decode(href.substring(wikiLinkScheme.length + 1));
-}
-
-/// Percent-decodes [text], or returns null when it is not valid. Page text
-/// comes from every device: `%FF` must not take a page down for everyone.
-String? _decode(String text) {
-  try {
-    return Uri.decodeComponent(text);
-  } on ArgumentError {
-    return null;
-  } on FormatException {
-    return null;
-  }
-}
+export 'markdown_parse.dart';
 
 /// Links that may leave the app. Anything else -- javascript:, data:, a
 /// relative path -- is not followed: page text comes from every device of
@@ -66,50 +20,6 @@ bool isSafeExternalLink(String? href) {
   return uri != null &&
       const {'http', 'https', 'mailto'}.contains(uri.scheme) &&
       (uri.scheme == 'mailto' || uri.host.isNotEmpty);
-}
-
-/// A Markdown document set up exactly as [PageMarkdown] renders one.
-md.Document pageDocument() => md.Document(
-      extensionSet: md.ExtensionSet.gitHubFlavored,
-      inlineSyntaxes: [WikiLinkSyntax()],
-      encodeHtml: false,
-    );
-
-/// Parses [body] the way [PageMarkdown] does.
-List<md.Node> parsePage(String body) =>
-    pageDocument().parseLines(const LineSplitter().convert(body));
-
-/// A backslash ending a line; an even run is escaped backslashes.
-final RegExp _trailingBackslash = RegExp(r'(?<!\\)((?:\\\\)*\\)$');
-
-/// [body] in a form the Markdown parser does not crash on, or null when there
-/// is none.
-///
-/// markdown 7.3.1 throws a RangeError on a block that starts with `[` and
-/// ends with a backslash -- `[C:\Temp\` as a page's last line is enough.
-/// Page text comes from every device, so one such line would make the page
-/// unreadable everywhere. The workaround puts a space after a backslash that
-/// ends a line, which only drops a hard line break; it is used only when the
-/// text as written does not parse.
-String? renderableMarkdown(String body) {
-  if (_parses(body)) {
-    return body;
-  }
-  final patched = const LineSplitter()
-      .convert(body)
-      .map((line) =>
-          line.replaceFirstMapped(_trailingBackslash, (m) => '${m[1]} '))
-      .join('\n');
-  return _parses(patched) ? patched : null;
-}
-
-bool _parses(String body) {
-  try {
-    parsePage(body);
-    return true;
-  } on Object {
-    return false;
-  }
 }
 
 /// Renders [body] as Markdown (GitHub flavour: tables, task lists, fenced
@@ -200,7 +110,7 @@ class PageMarkdown extends StatelessWidget {
       return _placeholder(
           context, Icons.public_off, 'Remote image not loaded: $label');
     }
-    final filename = _decode(uri.path);
+    final filename = percentDecode(uri.path);
     final bytes = filename == null ? null : imageBytes(filename);
     if (bytes == null) {
       return _placeholder(

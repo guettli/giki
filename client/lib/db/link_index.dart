@@ -39,8 +39,9 @@ void reindexLinks(CommonDatabase db, String nodeId) {
 ///
 /// Version 1 is the release in which deltas started maintaining the index:
 /// every page that had synced before it was missing from backlinks, and
-/// fixing the write path alone would not have repaired them. Version 2 stops
-/// counting links that are shown as text: in code, or after a backslash.
+/// fixing the write path alone would not have repaired them. Version 2 reads
+/// links from the Markdown parse that renders the page, so a link shown as
+/// text -- in code, say -- is no longer a backlink.
 const int linkIndexVersion = 2;
 
 /// The sync_meta key recording which version of the index a device has.
