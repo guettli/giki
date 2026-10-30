@@ -4,18 +4,29 @@ library;
 import 'package:flutter/material.dart';
 
 import '../db/database.dart';
+import '../db/page_cards.dart';
 import '../db/repository.dart';
+import '../srs/card_text.dart';
 import '../srs/srs.dart';
+import 'wiki_page.dart';
 
 /// Reviews the cards that are due.
 class StudyPage extends StatefulWidget {
-  const StudyPage({required this.db, required this.cards, super.key});
+  const StudyPage({
+    required this.db,
+    required this.cards,
+    required this.nodes,
+    super.key,
+  });
 
   /// The local database.
   final GikiDatabase db;
 
   /// Card storage.
   final CardRepository cards;
+
+  /// Page storage: a card written in a page is edited through its line.
+  final NodeRepository nodes;
 
   @override
   State<StudyPage> createState() => _StudyPageState();
@@ -76,6 +87,12 @@ class _StudyPageState extends State<StudyPage> {
                     ),
                     Text(card.front,
                         style: Theme.of(context).textTheme.headlineSmall),
+                    if (card.pageTitle case final title?)
+                      TextButton.icon(
+                        icon: const Icon(Icons.description_outlined),
+                        label: Text('From "$title"'),
+                        onPressed: () => _openPage(card.nodeId),
+                      ),
                     if (revealed) ...[
                       const Divider(height: 32),
                       Text(card.back,
@@ -119,26 +136,65 @@ class _StudyPageState extends State<StudyPage> {
     setState(() => _revealedCardId = null);
   }
 
+  /// The page and the line that write [card], or null for a card made here
+  /// -- or one whose page or line is gone.
+  (Node, CardLineAt)? _pageLine(DueCard? card) {
+    if (card == null || card.nodeId.isEmpty) {
+      return null;
+    }
+    final node = widget.nodes.byId(card.nodeId);
+    final line = node == null
+        ? null
+        : pageCardLine(node.body, nodeId: node.id, cardId: card.cardId);
+    return line == null ? null : (node!, line);
+  }
+
   /// Creates a card, or edits [card].
+  ///
+  /// A card written in a page is edited through its line, so the page says
+  /// what the card says, and the next edit of the page keeps the change.
   Future<void> _editCard(DueCard? card) async {
+    final page = _pageLine(card);
     final sides = await showDialog<(String, String)>(
       context: context,
-      builder: (context) => _CardDialog(card: card),
+      builder: (context) => _CardDialog(card: card, pageTitle: page?.$1.title),
     );
-    if (sides != null) {
+    if (sides == null) {
+      return;
+    }
+    if (page == null) {
       widget.cards.save(id: card?.cardId, front: sides.$1, back: sides.$2);
-      if (mounted) {
-        setState(() {});
+    } else if (_pageLine(card) case (final node, final line)) {
+      // Read again: a sync may have changed the page while the dialog was
+      // open, and writing the text from before it would undo that change.
+      final body =
+          editPageCardLine(node.body, line, front: sides.$1, back: sides.$2);
+      if (body == null) {
+        _tell('That does not fit on its line in "${node.title}": a question '
+            'can be asked only once per page, and cannot contain " :: ".');
+        return;
       }
+      widget.nodes.save(id: node.id, title: node.title, body: body);
+    } else {
+      _tell('The card\'s line in "${page.$1.title}" changed meanwhile, on '
+          'another device. Nothing was saved.');
+      return;
+    }
+    if (mounted) {
+      setState(() {});
     }
   }
 
   Future<void> _deleteCard(DueCard card) async {
+    final page = _pageLine(card);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete card?'),
-        content: Text('"${card.front}" is removed on every device.'),
+        content: Text(page == null
+            ? '"${card.front}" is removed on every device.'
+            : '"${card.front}" is removed on every device, and so is its '
+                'line in "${page.$1.title}".'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -151,11 +207,45 @@ class _StudyPageState extends State<StudyPage> {
         ],
       ),
     );
-    if (confirmed ?? false) {
+    if (!(confirmed ?? false)) {
+      return;
+    }
+    if (page == null) {
       widget.cards.delete(card.cardId);
-      if (mounted) {
-        setState(() {});
+    } else if (_pageLine(card) case (final node, final line)) {
+      // Read again, as in _editCard. Removing the line deletes the card: the
+      // page and its cards change in one transaction.
+      final body = editPageCardLine(node.body, line);
+      if (body == null) {
+        _tell('"${node.title}" asks this question again further down, so '
+            'the card would stay. Open the page to remove both lines.');
+        return;
       }
+      widget.nodes.save(id: node.id, title: node.title, body: body);
+    } else {
+      _tell('The card\'s line in "${page.$1.title}" changed meanwhile, on '
+          'another device. Nothing was deleted.');
+      return;
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _openPage(String nodeId) async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) =>
+          NodeEditor(db: widget.db, nodes: widget.nodes, nodeId: nodeId),
+    ));
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _tell(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
   }
 }
@@ -167,9 +257,12 @@ class _StudyPageState extends State<StudyPage> {
 /// caller right after showDialog returned, they were still in use by the
 /// dialog's closing animation.
 class _CardDialog extends StatefulWidget {
-  const _CardDialog({required this.card});
+  const _CardDialog({required this.card, this.pageTitle});
 
   final DueCard? card;
+
+  /// The page whose line the card is written in, if any.
+  final String? pageTitle;
 
   @override
   State<_CardDialog> createState() => _CardDialogState();
@@ -197,6 +290,15 @@ class _CardDialogState extends State<_CardDialog> {
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (widget.pageTitle case final title?)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Saved to its line in "$title". A changed question makes '
+                'it a new card, which starts its reviews over.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           Semantics(
               textField: true,
               label: 'Front',

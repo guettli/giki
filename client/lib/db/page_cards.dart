@@ -95,3 +95,65 @@ PageCardChanges syncPageCards(
   }
   return PageCardChanges(created: created, updated: updated, deleted: deleted);
 }
+
+/// The line of [body] that writes card [cardId] of page [nodeId], or null
+/// when there is none: the card was made by hand, or its line is gone.
+CardLineAt? pageCardLine(String body,
+    {required String nodeId, required String cardId}) {
+  for (final at in cardLinesAt(body)) {
+    if (pageCardId(nodeId, cardKey(at.card.front)) == cardId) {
+      return at;
+    }
+  }
+  return null;
+}
+
+/// [body] with [line] changed to `front :: back`, or removed when [front] is
+/// null. Null when the result would not be just that: the new line must read
+/// back as the card it says, and every other card of the page must stay as
+/// it was. That refuses a question already asked elsewhere on the page -- the
+/// two lines would become one card -- text that does not fit on one card
+/// line, and removing a line whose question the page asks again further
+/// down, which would only hand the card to that line.
+///
+/// This is how the Study page edits a card from a page: through its line,
+/// which is what the card is derived from. Writing the card row alone would
+/// be undone the next time someone edits that line.
+String? editPageCardLine(String body, CardLineAt line,
+    {String? front, String back = ''}) {
+  final lines = body.split('\n');
+  final removing = front == null;
+  if (removing) {
+    lines.removeAt(line.lineIndex);
+  } else {
+    final ending = lines[line.lineIndex].endsWith('\r') ? '\r' : '';
+    lines[line.lineIndex] = '${line.prefix}$front :: $back$ending';
+  }
+  final edited = lines.join('\n');
+
+  final othersBefore = {
+    for (final at in cardLinesAt(body))
+      if (at.lineIndex != line.lineIndex) at.lineIndex: at.card,
+  };
+  final othersAfter = <int, CardLine>{};
+  CardLine? written;
+  for (final at in cardLinesAt(edited)) {
+    if (!removing && at.lineIndex == line.lineIndex) {
+      written = at.card;
+    } else {
+      // Lines below a removed one moved up by one.
+      final index = removing && at.lineIndex >= line.lineIndex
+          ? at.lineIndex + 1
+          : at.lineIndex;
+      othersAfter[index] = at.card;
+    }
+  }
+  if (!removing && written != CardLine(front.trim(), back.trim())) {
+    return null;
+  }
+  return _sameCards(othersBefore, othersAfter) ? edited : null;
+}
+
+bool _sameCards(Map<int, CardLine> a, Map<int, CardLine> b) =>
+    a.length == b.length &&
+    a.entries.every((entry) => b[entry.key] == entry.value);

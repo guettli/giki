@@ -27,6 +27,8 @@ still needs a web worker (see [docs/architecture.md](docs/architecture.md)).
 * **Spaced repetition.** Flashcards on a Leitner box ladder. Write a card
   right where the knowledge lives -- a line `Question :: Answer` in any page
   becomes a card, and editing or removing the line updates or removes it.
+  Editing or deleting such a card while studying changes its line in the
+  page, so the page and the card always say the same.
   Scheduling state is per user, so a shared knowledge base does not mean
   shared progress.
 * **Offline by default.** The local database is the source of truth. Reads and
