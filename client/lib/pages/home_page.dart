@@ -9,6 +9,7 @@ import '../db/repository.dart';
 import '../sync/api_client.dart';
 import '../sync/sync_service.dart';
 import 'settings_page.dart';
+import 'shortcut.dart';
 import 'study_page.dart';
 import 'wiki_page.dart';
 
@@ -28,16 +29,20 @@ class _HomePageState extends State<HomePage> {
   SyncService? _sync;
   String _status = '';
   final FocusNode _searchFocus = FocusNode(debugLabel: 'search pages');
+  late final KeyEventCallback _keys =
+      controlShortcut(() => context, LogicalKeyboardKey.keyK, _search);
 
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_keys);
     _configureSync();
   }
 
   @override
   void dispose() {
     _sync?.dispose();
+    HardwareKeyboard.instance.removeHandler(_keys);
     _searchFocus.dispose();
     super.dispose();
   }
@@ -102,19 +107,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   @override
-  Widget build(BuildContext context) => CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.keyK, control: true):
-              _search,
-          const SingleActivator(LogicalKeyboardKey.keyK, meta: true): _search,
-        },
-        // Shortcuts reach only focused widgets and their ancestors: before
-        // anything is focused, this is.
-        child:
-            Focus(autofocus: true, skipTraversal: true, child: _page(context)),
-      );
-
-  Widget _page(BuildContext context) {
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('giki'),

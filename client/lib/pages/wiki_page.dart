@@ -19,6 +19,7 @@ import '../wiki/wikilink.dart';
 import 'age.dart';
 import 'attachments_section.dart';
 import 'history_page.dart';
+import 'shortcut.dart';
 
 /// Lists the most recently edited nodes.
 class WikiPage extends StatefulWidget {
@@ -292,7 +293,15 @@ class _NodeEditorState extends State<NodeEditor> {
     _savedBody = _body.text;
     widget.db.nodesRevision.addListener(_onNodesChanged);
     widget.db.attachmentsRevision.addListener(_onAttachmentsChanged);
+    HardwareKeyboard.instance.addHandler(_saveKey);
   }
+
+  /// Ctrl+S (Cmd+S on a Mac) saves, as in every editor; the browser's own
+  /// "save page as" would only download the app.
+  late final KeyEventCallback _saveKey =
+      controlShortcut(() => context, LogicalKeyboardKey.keyS, () {
+    _save();
+  });
 
   /// An attachment or its bytes arrived: an inline image may now be showable.
   void _onAttachmentsChanged() {
@@ -338,6 +347,7 @@ class _NodeEditorState extends State<NodeEditor> {
   void dispose() {
     widget.db.nodesRevision.removeListener(_onNodesChanged);
     widget.db.attachmentsRevision.removeListener(_onAttachmentsChanged);
+    HardwareKeyboard.instance.removeHandler(_saveKey);
     _title.dispose();
     _body.dispose();
     super.dispose();
@@ -612,24 +622,8 @@ class _NodeEditorState extends State<NodeEditor> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Ctrl+S (Cmd+S on a Mac) saves, as in every editor; the browser's own
-  /// "save page as" would only download the app.
   @override
-  Widget build(BuildContext context) => CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
-            _save();
-          },
-          const SingleActivator(LogicalKeyboardKey.keyS, meta: true): () {
-            _save();
-          },
-        },
-        // Somewhere to hold focus in Read mode, where there is no text field.
-        child:
-            Focus(autofocus: true, skipTraversal: true, child: _page(context)),
-      );
-
-  Widget _page(BuildContext context) {
+  Widget build(BuildContext context) {
     final node = _node;
     final backlinks = node == null
         ? const <NodeSummary>[]
