@@ -1,6 +1,8 @@
 package wikilink
 
 import (
+	"encoding/json"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -18,23 +20,25 @@ func TestNormalizeTitle(t *testing.T) {
 	}
 }
 
+// TestParse runs testdata/cases.json, which client/test_vm/wikilink_test.dart
+// runs too: client and server must agree about where a link points.
 func TestParse(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-		want []string
-	}{
-		{"none", "plain text", []string{}},
-		{"simple", "see [[Leitner]] and [[SM-2]]", []string{"leitner", "sm-2"}},
-		{"labelled", "see [[Spaced Repetition|the method]]", []string{"spaced repetition"}},
-		{"deduped", "[[A]] then [[a]] again", []string{"a"}},
-		{"unclosed", "[[broken and [[Good]]", []string{"good"}},
-		{"empty target", "[[]] [[ ]] [[Real]]", []string{"real"}},
+	data, err := os.ReadFile("testdata/cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tests []struct {
+		Name string   `json:"name"`
+		Body string   `json:"body"`
+		Want []string `json:"want"`
+	}
+	if err := json.Unmarshal(data, &tests); err != nil {
+		t.Fatal(err)
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := Parse(tc.body); !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("Parse(%q) = %v, want %v", tc.body, got, tc.want)
+		t.Run(tc.Name, func(t *testing.T) {
+			if got := Parse(tc.Body); !reflect.DeepEqual(got, tc.Want) {
+				t.Errorf("Parse(%q) = %q, want %q", tc.Body, got, tc.Want)
 			}
 		})
 	}

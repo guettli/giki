@@ -2,6 +2,7 @@
 /// page's own attachments.
 library;
 
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -67,6 +68,50 @@ bool isSafeExternalLink(String? href) {
       (uri.scheme == 'mailto' || uri.host.isNotEmpty);
 }
 
+/// A Markdown document set up exactly as [PageMarkdown] renders one.
+md.Document pageDocument() => md.Document(
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+      inlineSyntaxes: [WikiLinkSyntax()],
+      encodeHtml: false,
+    );
+
+/// Parses [body] the way [PageMarkdown] does.
+List<md.Node> parsePage(String body) =>
+    pageDocument().parseLines(const LineSplitter().convert(body));
+
+/// A backslash ending a line; an even run is escaped backslashes.
+final RegExp _trailingBackslash = RegExp(r'(?<!\\)((?:\\\\)*\\)$');
+
+/// [body] in a form the Markdown parser does not crash on, or null when there
+/// is none.
+///
+/// markdown 7.3.1 throws a RangeError on a block that starts with `[` and
+/// ends with a backslash -- `[C:\Temp\` as a page's last line is enough.
+/// Page text comes from every device, so one such line would make the page
+/// unreadable everywhere. The workaround puts a space after a backslash that
+/// ends a line, which only drops a hard line break; it is used only when the
+/// text as written does not parse.
+String? renderableMarkdown(String body) {
+  if (_parses(body)) {
+    return body;
+  }
+  final patched = const LineSplitter()
+      .convert(body)
+      .map((line) =>
+          line.replaceFirstMapped(_trailingBackslash, (m) => '${m[1]} '))
+      .join('\n');
+  return _parses(patched) ? patched : null;
+}
+
+bool _parses(String body) {
+  try {
+    parsePage(body);
+    return true;
+  } on Object {
+    return false;
+  }
+}
+
 /// Renders [body] as Markdown (GitHub flavour: tables, task lists, fenced
 /// code, strikethrough).
 ///
@@ -102,11 +147,25 @@ class PageMarkdown extends StatelessWidget {
         style: TextStyle(color: Theme.of(context).hintColor),
       );
     }
+    final source = _renderable(body);
+    if (source == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'This page cannot be formatted, so it is shown as plain text.',
+            style: TextStyle(color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 8),
+          SelectableText(body),
+        ],
+      );
+    }
     // SelectionArea rather than `selectable: true`: that renders editable
     // text fields, in which a link is no longer a plain tap target.
     return SelectionArea(
       child: MarkdownBody(
-        data: body,
+        data: source,
         inlineSyntaxes: [WikiLinkSyntax()],
         extensionSet: md.ExtensionSet.gitHubFlavored,
         onTapLink: (text, href, title) {
@@ -120,6 +179,19 @@ class PageMarkdown extends StatelessWidget {
         imageBuilder: (uri, title, alt) => _image(context, uri, alt),
       ),
     );
+  }
+
+  // build runs on every rebuild of the editor, and renderableMarkdown parses
+  // the page once more; remember the last answer.
+  static String? _lastBody;
+  static String? _lastSource;
+
+  static String? _renderable(String body) {
+    if (body != _lastBody) {
+      _lastSource = renderableMarkdown(body);
+      _lastBody = body;
+    }
+    return _lastSource;
   }
 
   Widget _image(BuildContext context, Uri uri, String? alt) {
