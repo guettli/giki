@@ -680,7 +680,11 @@ class _NodeEditorState extends State<NodeEditor> {
     final backlinks = node == null
         ? const <NodeSummary>[]
         : widget.nodes.backlinks(node.titleKey);
-    final targets = node == null ? const <String>[] : _linkTargets(node.body);
+    // None for a page deleted elsewhere: its links are gone from the index,
+    // and following one would create a page for a deleted page's link.
+    final targets = node == null || _deletedElsewhere
+        ? const <String>[]
+        : _linkTargets(node.body);
 
     return Scaffold(
       appBar: AppBar(
