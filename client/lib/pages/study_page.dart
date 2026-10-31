@@ -216,7 +216,10 @@ class _StudyPageState extends State<StudyPage> {
       return;
     }
     if (page == null) {
-      widget.cards.delete(card.cardId);
+      if (!widget.cards.delete(card.cardId)) {
+        _goneMeanwhile('This card was already deleted on another device.');
+        return;
+      }
     } else if (_pageLine(card) case (final node, final line)) {
       // Read again, as in _editCard. Removing the line deletes the card: the
       // page and its cards change in one transaction.

@@ -363,12 +363,15 @@ class CardRepository {
 
   /// Deletes a card on every device. Its schedule and history stay: they are
   /// the user's record, and a card restored elsewhere picks them up again.
-  void delete(String id) {
-    _db.raw.execute(
-      'UPDATE cards SET is_deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?',
-      [nowClock(), _db.userId, id],
-    );
-  }
+  ///
+  /// Returns false, and writes nothing, when the card was deleted already: a
+  /// fresh stamp on the tombstone would sync as a second deletion, and an
+  /// Undo of the first (NodeRepository.undoDelete) would no longer find it.
+  bool delete(String id) => _db.raw.select(
+        'UPDATE cards SET is_deleted = 1, updated_at = ?, updated_by = ? '
+        'WHERE id = ? AND is_deleted = 0 RETURNING id',
+        [nowClock(), _db.userId, id],
+      ).isNotEmpty;
 
   /// The cards due for the current user, soonest first.
   List<DueCard> due({DateTime? at, int limit = 50}) {

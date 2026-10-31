@@ -1144,7 +1144,10 @@ void main() {
       (tester) async {
     final cards = CardRepository(db);
     Future<void> editWhileDeleted(String front, void Function() delete) async {
+      // A fresh app each time: the first message would otherwise still be
+      // showing, and hold back the second.
       await tester.pumpWidget(MaterialApp(
+        key: UniqueKey(),
         home: StudyPage(db: db, cards: cards, nodes: nodes),
       ));
       await tester.pumpAndSettle();
@@ -1181,6 +1184,14 @@ void main() {
     expect(find.textContaining('"Doomed" was deleted on another device'),
         findsOneWidget);
     expect(nodes.byId(page), isNull, reason: 'the edit restored the page');
+
+    // Deleting a card that is gone already leaves its tombstone alone.
+    final twice = cards.save(front: 'Twice?', back: 'once');
+    expect(cards.delete(twice), isTrue);
+    final pending = db.pendingCount;
+    expect(cards.delete(twice), isFalse);
+    expect(db.pendingCount, pending,
+        reason: 'deleting a deleted card queued a write');
   });
 
   testWidgets('text fields have an accessible name', (tester) async {
