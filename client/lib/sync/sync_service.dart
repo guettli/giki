@@ -70,12 +70,21 @@ class SyncService {
     this.batchSize = 500,
   })  : _db = db,
         _api = api,
-        _attachments = AttachmentRepository(db) {
+        _attachments = AttachmentRepository(db),
+        _generation = db.serverGeneration {
     _db.blobsWanted.addListener(_onBlobsWanted);
   }
 
   final GikiDatabase _db;
   final SyncApiClient _api;
+
+  /// The server generation [_api] talks to (GikiDatabase.serverGeneration).
+  final int _generation;
+
+  /// True once the database has been pointed at another server: from then
+  /// on this service writes nothing, since everything it would record is
+  /// about the old server.
+  bool get _stale => _db.serverGeneration != _generation;
   final AttachmentRepository _attachments;
 
   /// How many outbox rows go into one request.
@@ -147,7 +156,12 @@ class SyncService {
       for (final key in next) {
         tried.add(key);
         try {
-          if (_attachments.storeFetched(key, await _api.getBlob(key))) {
+          final bytes = await _api.getBlob(key);
+          if (_stale) {
+            // Stored now, it would be marked as being on the new server.
+            return fetched;
+          }
+          if (_attachments.storeFetched(key, bytes)) {
             fetched++;
           }
           _db.wantedBlobs.remove(key);
@@ -178,7 +192,7 @@ class SyncService {
   /// Overlapping runs are skipped rather than queued: two concurrent pushes of
   /// the same outbox rows would be applied twice on the server.
   Future<SyncReport> syncOnce() async {
-    if (_running) {
+    if (_running || _stale) {
       return SyncReport.idle(_db.cursor);
     }
     _running = true;
@@ -199,6 +213,9 @@ class SyncService {
         try {
           if (bytes != null) {
             await _api.putBlob(key, bytes);
+          }
+          if (_stale) {
+            return SyncReport.idle(_db.cursor);
           }
           _attachments.markUploaded(key);
           uploaded++;
@@ -222,6 +239,11 @@ class SyncService {
         mutations: pending,
         maxDeltas: batchSize,
       );
+      if (_stale) {
+        // Switched while the request was out: the new server has not seen
+        // these rows, so they stay queued, and this cursor is the old one's.
+        return SyncReport.idle(_db.cursor);
+      }
 
       // Order matters. Deltas and the new cursor are committed first, in one
       // transaction. Only then are the pushed rows dropped from the outbox:

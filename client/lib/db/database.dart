@@ -220,7 +220,15 @@ class GikiDatabase {
   /// is uploaded again; an attachment whose bytes this device never fetched
   /// is not queued, since no server accepts a row without its bytes.
   bool setServerUrl(String url) {
-    String plain(String? u) => (u ?? '').replaceFirst(RegExp(r'/+$'), '');
+    // Same server however it is written: host case, a default port, a
+    // trailing slash.
+    String plain(String? u) {
+      final parsed = Uri.tryParse(u ?? '');
+      return (parsed == null ? (u ?? '') : parsed.toString())
+          .toLowerCase()
+          .replaceFirst(RegExp(r'/+$'), '');
+    }
+
     final previous = meta(MetaKeys.serverUrl);
     if (plain(previous) == plain(url)) {
       if (previous != url) {
@@ -232,6 +240,10 @@ class GikiDatabase {
     try {
       setMeta(MetaKeys.serverUrl, url);
       if (plain(previous).isNotEmpty) {
+        // The old server's session means nothing to the new one, and must
+        // not be sent to it.
+        setMeta(MetaKeys.token, '');
+        setMeta(MetaKeys.passkeyId, '');
         setMeta(MetaKeys.cursor, '0');
         for (final table in syncableTables) {
           // A no-op update still fires the outbox trigger, which queues the
@@ -248,8 +260,17 @@ class GikiDatabase {
       raw.execute('ROLLBACK');
       rethrow;
     }
-    return plain(previous).isNotEmpty;
+    if (plain(previous).isEmpty) {
+      return false;
+    }
+    serverGeneration++;
+    return true;
   }
+
+  /// Bumped by every switch to another server. A sync service built for an
+  /// earlier one must stop writing: its round would settle the re-queued
+  /// outbox, the blob flags and the cursor against the old server.
+  int serverGeneration = 0;
 
   /// This device's id, generated on first launch and stable afterwards.
   String get deviceId => meta(MetaKeys.deviceId)!;

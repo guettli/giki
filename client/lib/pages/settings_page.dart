@@ -89,8 +89,10 @@ class _SettingsPageState extends State<SettingsPage> {
   /// Stores [uri] as the server. When that replaces another server,
   /// everything on this device is sent to the new one
   /// (GikiDatabase.setServerUrl), and the next status line says so.
-  void _setServer(Uri uri) {
-    _switched = widget.db.setServerUrl(uri.toString()) || _switched;
+  bool _setServer(Uri uri) {
+    final switched = widget.db.setServerUrl(uri.toString());
+    _switched = switched || _switched;
+    return switched;
   }
 
   bool _switched = false;
@@ -99,7 +101,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _takeSwitchedNote() {
     final note = _switched
         ? ' Switched server: everything on this device will be sent to the '
-            'new one at the next sync.'
+            'new one.'
         : '';
     _switched = false;
     return note;
@@ -246,14 +248,22 @@ class _SettingsPageState extends State<SettingsPage> {
   /// reach it.
   Future<void> _saveAdvanced() => _guard(() async {
         final uri = _serverUri;
+        final oldServer =
+            Uri.tryParse(widget.db.meta(MetaKeys.serverUrl) ?? '');
         final previous = widget.db.meta(MetaKeys.token) ?? '';
         final replacement = _staticToken.text.trim();
 
-        if (replacement.isNotEmpty &&
-            previous.isNotEmpty &&
-            previous != replacement &&
-            uri != null) {
-          final api = PasskeyApi(baseUrl: uri);
+        // Switching first: it drops the old server's session, which a
+        // replacement token typed here must outlive.
+        final switched = uri != null && _setServer(uri);
+
+        // A session this device stops using is ended where it was issued:
+        // otherwise it keeps working for weeks with no way to reach it.
+        if (previous.isNotEmpty &&
+            (switched || (replacement.isNotEmpty && replacement != previous)) &&
+            oldServer != null &&
+            oldServer.hasScheme) {
+          final api = PasskeyApi(baseUrl: oldServer);
           try {
             await api.logout(previous);
           } on Object {
@@ -269,9 +279,6 @@ class _SettingsPageState extends State<SettingsPage> {
           widget.db.setMeta(MetaKeys.passkeyId, '');
         }
         widget.db.setMeta(MetaKeys.userId, _advancedUser.text.trim());
-        if (uri != null) {
-          _setServer(uri);
-        }
         await widget.db.flush();
         if (mounted) {
           setState(() => _status = 'Saved.${_takeSwitchedNote()}');
@@ -308,7 +315,22 @@ class _SettingsPageState extends State<SettingsPage> {
   /// Stores a session from the server at [server], which becomes this
   /// device's server -- only now, so a cancelled ceremony switches nothing.
   Future<void> _storeSession(PasskeySession session, Uri server) async {
-    _setServer(server);
+    final oldServer = Uri.tryParse(widget.db.meta(MetaKeys.serverUrl) ?? '');
+    final oldToken = widget.db.meta(MetaKeys.token) ?? '';
+    if (_setServer(server) &&
+        oldToken.isNotEmpty &&
+        oldServer != null &&
+        oldServer.hasScheme) {
+      // The old server's session is no use any more; end it there.
+      final api = PasskeyApi(baseUrl: oldServer);
+      try {
+        await api.logout(oldToken);
+      } on Object {
+        // Unreachable or already gone: nothing to do about it here.
+      } finally {
+        api.close();
+      }
+    }
     widget.db.setMeta(MetaKeys.token, session.token);
     widget.db.setMeta(MetaKeys.userId, session.userId);
     widget.db.setMeta(MetaKeys.passkeyId, session.passkeyId);
