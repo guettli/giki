@@ -349,6 +349,18 @@ class CardRepository {
     return cardId;
   }
 
+  /// Changes the text of card [id], keeping its page and schedule.
+  ///
+  /// Returns false, and writes nothing, when the card is gone: deleted on
+  /// another device while it was being edited here. An edit written into
+  /// the tombstone would sync to every device and be shown on none.
+  bool update(String id, {required String front, required String back}) =>
+      _db.raw.select(
+        'UPDATE cards SET front = ?, back = ?, updated_at = ?, updated_by = ? '
+        'WHERE id = ? AND is_deleted = 0 RETURNING id',
+        [front, back, nowClock(), _db.userId, id],
+      ).isNotEmpty;
+
   /// Deletes a card on every device. Its schedule and history stay: they are
   /// the user's record, and a card restored elsewhere picks them up again.
   void delete(String id) {

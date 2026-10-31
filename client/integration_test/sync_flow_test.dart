@@ -1137,6 +1137,52 @@ void main() {
     expect(cards.due(limit: 1000).where((c) => c.cardId == cardId), isEmpty);
   });
 
+  // Saving an edited card wrote into its tombstone when it had been deleted
+  // on another device meanwhile: the edit synced everywhere and showed
+  // nowhere.
+  testWidgets('a card deleted elsewhere while being edited stays deleted',
+      (tester) async {
+    final cards = CardRepository(db);
+    Future<void> editWhileDeleted(String front, void Function() delete) async {
+      await tester.pumpWidget(MaterialApp(
+        home: StudyPage(db: db, cards: cards, nodes: nodes),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text(front), findsOneWidget);
+      await tester.tap(find.byTooltip('Edit card'));
+      await tester.pumpAndSettle();
+      delete();
+      await tester.enterText(find.byType(TextField).at(1), 'too late');
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+    }
+
+    // A card of its own.
+    final own = cards.save(front: 'Gone soon?', back: 'yes');
+    // Answered long ago, so it is the first card the Study page shows.
+    cards.review(
+        cards.due(limit: 1000).firstWhere((c) => c.cardId == own), Rating.good,
+        at: DateTime.utc(1999));
+    await editWhileDeleted('Gone soon?', () => cards.delete(own));
+    expect(find.textContaining('deleted on another device'), findsOneWidget);
+    final row = db.raw
+        .select('SELECT back, is_deleted FROM cards WHERE id = ?', [own]).first;
+    expect(row['is_deleted'], 1);
+    expect(row['back'], 'yes', reason: 'the edit went into the tombstone');
+    expect(find.text('Gone soon?'), findsNothing);
+
+    // A card written in a page whose page goes.
+    final page = nodes.save(title: 'Doomed', body: 'Doomed question :: yes');
+    final fromPage = pageCardId(page, 'doomed question');
+    cards.review(cards.due(limit: 1000).firstWhere((c) => c.cardId == fromPage),
+        Rating.good,
+        at: DateTime.utc(1999));
+    await editWhileDeleted('Doomed question', () => nodes.delete(page));
+    expect(find.textContaining('"Doomed" was deleted on another device'),
+        findsOneWidget);
+    expect(nodes.byId(page), isNull, reason: 'the edit restored the page');
+  });
+
   testWidgets('text fields have an accessible name', (tester) async {
     // Flutter renders InputDecoration's label as a sibling node, so without
     // explicit semantics the editable element reaches assistive technology
