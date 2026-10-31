@@ -162,8 +162,14 @@ class _StudyPageState extends State<StudyPage> {
     if (sides == null) {
       return;
     }
-    if (page == null) {
-      widget.cards.save(id: card?.cardId, front: sides.$1, back: sides.$2);
+    if (card == null) {
+      widget.cards.save(front: sides.$1, back: sides.$2);
+    } else if (page == null) {
+      if (!widget.cards.update(card.cardId, front: sides.$1, back: sides.$2)) {
+        _goneMeanwhile('This card was deleted on another device. '
+            'Nothing was saved.');
+        return;
+      }
     } else if (_pageLine(card) case (final node, final line)) {
       // Read again: a sync may have changed the page while the dialog was
       // open, and writing the text from before it would undo that change.
@@ -176,8 +182,7 @@ class _StudyPageState extends State<StudyPage> {
       }
       widget.nodes.save(id: node.id, title: node.title, body: body);
     } else {
-      _tell('The card\'s line in "${page.$1.title}" changed meanwhile, on '
-          'another device. Nothing was saved.');
+      _goneMeanwhile(_changedElsewhere(card, page.$1.title, 'saved'));
       return;
     }
     if (mounted) {
@@ -211,7 +216,10 @@ class _StudyPageState extends State<StudyPage> {
       return;
     }
     if (page == null) {
-      widget.cards.delete(card.cardId);
+      if (!widget.cards.delete(card.cardId)) {
+        _goneMeanwhile('This card was already deleted on another device.');
+        return;
+      }
     } else if (_pageLine(card) case (final node, final line)) {
       // Read again, as in _editCard. Removing the line deletes the card: the
       // page and its cards change in one transaction.
@@ -223,10 +231,26 @@ class _StudyPageState extends State<StudyPage> {
       }
       widget.nodes.save(id: node.id, title: node.title, body: body);
     } else {
-      _tell('The card\'s line in "${page.$1.title}" changed meanwhile, on '
-          'another device. Nothing was deleted.');
+      _goneMeanwhile(_changedElsewhere(card, page.$1.title, 'deleted'));
       return;
     }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// Why a card's page could not be written: the page is gone, or the
+  /// card's line in it changed.
+  String _changedElsewhere(DueCard card, String title, String verb) =>
+      widget.nodes.byId(card.nodeId) == null
+          ? '"$title" was deleted on another device. Nothing was $verb.'
+          : 'The card\'s line in "$title" changed meanwhile, on another '
+              'device. Nothing was $verb.';
+
+  /// Says why nothing happened, and shows the queue as it is now: the card
+  /// the user acted on may no longer be in it.
+  void _goneMeanwhile(String message) {
+    _tell(message);
     if (mounted) {
       setState(() {});
     }
