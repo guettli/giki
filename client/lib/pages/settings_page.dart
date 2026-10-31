@@ -83,8 +83,26 @@ class _SettingsPageState extends State<SettingsPage> {
           'Enter the server URL first, e.g. https://giki.example.org');
       return null;
     }
-    widget.db.setMeta(MetaKeys.serverUrl, uri.toString());
     return PasskeyApi(baseUrl: uri);
+  }
+
+  /// Stores [uri] as the server. When that replaces another server,
+  /// everything on this device is sent to the new one
+  /// (GikiDatabase.setServerUrl), and the next status line says so.
+  void _setServer(Uri uri) {
+    _switched = widget.db.setServerUrl(uri.toString()) || _switched;
+  }
+
+  bool _switched = false;
+
+  /// ' Switched server ...' once after a switch, '' otherwise.
+  String _takeSwitchedNote() {
+    final note = _switched
+        ? ' Switched server: everything on this device will be sent to the '
+            'new one at the next sync.'
+        : '';
+    _switched = false;
+    return note;
   }
 
   /// Runs [action] with the busy flag set, turning failures into a status line
@@ -129,9 +147,10 @@ class _SettingsPageState extends State<SettingsPage> {
             ceremonyId: ceremony.id,
             credential: credential,
           );
-          await _storeSession(session);
+          await _storeSession(session, api.baseUrl);
           if (mounted) {
-            setState(() => _status = 'Signed in as ${session.userId}.');
+            setState(() => _status =
+                'Signed in as ${session.userId}.${_takeSwitchedNote()}');
           }
           await _refreshPasskeys();
         } finally {
@@ -174,11 +193,11 @@ class _SettingsPageState extends State<SettingsPage> {
             authorization: authorization,
             label: _deviceLabel(),
           );
-          await _storeSession(session);
+          await _storeSession(session, api.baseUrl);
           _registerToken.clear();
           if (mounted) {
-            setState(() => _status =
-                'Passkey registered. Signed in as ${session.userId}.');
+            setState(() => _status = 'Passkey registered. Signed in as '
+                '${session.userId}.${_takeSwitchedNote()}');
           }
           await _refreshPasskeys();
         } finally {
@@ -251,11 +270,11 @@ class _SettingsPageState extends State<SettingsPage> {
         }
         widget.db.setMeta(MetaKeys.userId, _advancedUser.text.trim());
         if (uri != null) {
-          widget.db.setMeta(MetaKeys.serverUrl, uri.toString());
+          _setServer(uri);
         }
         await widget.db.flush();
         if (mounted) {
-          setState(() => _status = 'Saved.');
+          setState(() => _status = 'Saved.${_takeSwitchedNote()}');
         }
       });
 
@@ -286,7 +305,10 @@ class _SettingsPageState extends State<SettingsPage> {
   /// something flushes them. Without this, signing in survives only until the
   /// first successful background sync, and signing out would not survive a
   /// reload at all.
-  Future<void> _storeSession(PasskeySession session) async {
+  /// Stores a session from the server at [server], which becomes this
+  /// device's server -- only now, so a cancelled ceremony switches nothing.
+  Future<void> _storeSession(PasskeySession session, Uri server) async {
+    _setServer(server);
     widget.db.setMeta(MetaKeys.token, session.token);
     widget.db.setMeta(MetaKeys.userId, session.userId);
     widget.db.setMeta(MetaKeys.passkeyId, session.passkeyId);

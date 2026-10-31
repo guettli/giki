@@ -208,6 +208,49 @@ class GikiDatabase {
     );
   }
 
+  /// Points this device at the server [url], and says whether that is a
+  /// different server than before.
+  ///
+  /// A different server starts from scratch, both ways. The cursor counted
+  /// the old server's ChangeLog: kept, it skipped that many of the new
+  /// server's changes. And the outbox held only what the old server had not
+  /// got yet: everything else on this device would never reach the new one.
+  /// So the cursor goes back to 0, and every row is queued again -- rows the
+  /// server already has come back "stale", which costs nothing. Every blob
+  /// is uploaded again; an attachment whose bytes this device never fetched
+  /// is not queued, since no server accepts a row without its bytes.
+  bool setServerUrl(String url) {
+    String plain(String? u) => (u ?? '').replaceFirst(RegExp(r'/+$'), '');
+    final previous = meta(MetaKeys.serverUrl);
+    if (plain(previous) == plain(url)) {
+      if (previous != url) {
+        setMeta(MetaKeys.serverUrl, url);
+      }
+      return false;
+    }
+    raw.execute('BEGIN IMMEDIATE');
+    try {
+      setMeta(MetaKeys.serverUrl, url);
+      if (plain(previous).isNotEmpty) {
+        setMeta(MetaKeys.cursor, '0');
+        for (final table in syncableTables) {
+          // A no-op update still fires the outbox trigger, which queues the
+          // row exactly as it is, with its own updated_at.
+          raw.execute(table == 'attachments'
+              ? 'UPDATE attachments SET id = id WHERE is_deleted = 1 '
+                  'OR sha256 IN (SELECT sha256 FROM blobs)'
+              : 'UPDATE "$table" SET id = id');
+        }
+        raw.execute('UPDATE blobs SET uploaded = 0');
+      }
+      raw.execute('COMMIT');
+    } on Object {
+      raw.execute('ROLLBACK');
+      rethrow;
+    }
+    return plain(previous).isNotEmpty;
+  }
+
   /// This device's id, generated on first launch and stable afterwards.
   String get deviceId => meta(MetaKeys.deviceId)!;
 
