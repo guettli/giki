@@ -126,6 +126,13 @@ class GikiDatabase {
 
     final giki = GikiDatabase._(db, fileSystem);
     giki._ensureDeviceId();
+    // The newest row on this device, so a write after a reload is still
+    // later than every version this device has seen (see nowClock).
+    for (final table in syncableTables) {
+      observeClock(db
+          .select('SELECT MAX(updated_at) AS m FROM "$table"')
+          .first['m'] as String?);
+    }
     // Repairs the link index of a device upgraded from a version whose deltas
     // did not maintain it. A no-op on every later start.
     ensureLinkIndex(db);
@@ -299,6 +306,7 @@ class GikiDatabase {
     if (columns.isEmpty) {
       return;
     }
+    observeClock(delta.payload['updated_at'] as String?);
     final placeholders = List.filled(columns.length, '?').join(', ');
     final assignments = columns
         .where((c) => c != 'id')
@@ -308,11 +316,13 @@ class GikiDatabase {
 
     // Last-Write-Wins again, this time locally: a delta must not overwrite a
     // local edit the user made while the request was in flight and which has
-    // not been pushed yet.
+    // not been pushed yet. On a tie the delta wins, as it did on the server:
+    // the server keeps the row it already had and sends only that one, so
+    // keeping ours would leave this device on a version nobody else has.
     raw.execute(
       'INSERT INTO "${delta.table}" ($quoted) VALUES ($placeholders) '
       'ON CONFLICT (id) DO UPDATE SET $assignments '
-      'WHERE excluded.updated_at > "${delta.table}".updated_at',
+      'WHERE excluded.updated_at >= "${delta.table}".updated_at',
       [for (final column in columns) delta.payload[column]],
     );
 

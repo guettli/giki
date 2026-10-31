@@ -1521,6 +1521,39 @@ void main() {
     await press(LogicalKeyboardKey.keyS);
     expect(nodes.byId(id)!.body, 'after', reason: 'Ctrl+S did not save');
   });
+
+  // Last on purpose: it leaves this client's clock an hour ahead of the real
+  // one, which "the other device writes in the past" phases above rely on not
+  // being the case.
+  testWidgets('an edit after pulling a fast clock still wins', (_) async {
+    // The other device's clock runs an hour fast. Its edit reaches the
+    // server and then this device...
+    final ahead =
+        formatClock(DateTime.now().toUtc().add(const Duration(hours: 1)));
+    const id = 'e2e-node-fast-clock';
+    await syncAsOtherDevice(mutations: [
+      nodeMutation(
+          clientSeq: 50,
+          id: id,
+          op: 'INSERT',
+          title: 'Fast Clock',
+          body: 'from the fast device',
+          clock: ahead),
+    ]);
+    await sync.syncOnce();
+    expect(nodes.byId(id)?.body, 'from the fast device');
+
+    // ...and the user edits it here a moment later. With the wall clock this
+    // edit was older than the version it replaced: the server called it
+    // stale, the outbox dropped it, and this device kept text nobody else
+    // would ever see.
+    nodes.save(id: id, title: 'Fast Clock', body: 'edited after pulling');
+    expect(nodes.byId(id)!.updatedAt.compareTo(ahead), greaterThan(0));
+    final report = await sync.syncOnce();
+    expect(report.applied, 1, reason: report.toString());
+    expect(report.stale, 0, reason: report.toString());
+    expect((await latestServerPayload(id))['body'], 'edited after pulling');
+  });
 }
 
 /// Passkey phases.

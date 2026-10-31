@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../db/attachments.dart';
+import '../db/clock.dart';
 import '../db/database.dart';
 import 'api_client.dart';
 
@@ -227,6 +228,9 @@ class SyncService {
       // if the tab dies in between, those mutations are pushed again, and the
       // server's Last-Write-Wins makes the repeat a no-op. The reverse order
       // would lose them.
+      // A device whose clock is behind the server's writes after it from
+      // now on, so its next edit is not born stale.
+      observeClock(response.serverTime);
       _db.applyDeltas(response.changes, response.cursor);
       await _db.flush();
 
