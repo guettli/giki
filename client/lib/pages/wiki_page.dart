@@ -442,9 +442,29 @@ class _NodeEditorState extends State<NodeEditor> {
       }
     }
 
+    // Two live pages with one title: every [[link]] to it leads to the older
+    // one, so the other can be found only by searching. Ask when this save
+    // would make that happen -- a new page, a rename, or bringing back a
+    // page deleted elsewhere, whose title may have been taken since -- but
+    // not on every save of a page that already shared its title.
+    final title = _title.text.trim();
+    final key = normalizeTitle(title);
+    final restoring =
+        existing != null && widget.nodes.byId(existing.id) == null;
+    if (key.isNotEmpty &&
+        (existing == null || restoring || normalizeTitle(_savedTitle) != key)) {
+      final other = widget.nodes.byTitle(title);
+      if (other != null && other.id != existing?.id) {
+        final saveAnyway = await _confirmDuplicateTitle(other.title);
+        if (!mounted || !saveAnyway) {
+          return;
+        }
+      }
+    }
+
     final id = widget.nodes.save(
       id: existing?.id,
-      title: _title.text.trim(),
+      title: title,
       body: _body.text,
     );
     setState(() {
@@ -618,6 +638,30 @@ class _NodeEditorState extends State<NodeEditor> {
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Restore with my text'),
+          ),
+        ],
+      ),
+    );
+    return choice ?? false;
+  }
+
+  Future<bool> _confirmDuplicateTitle(String title) async {
+    final choice = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('"$title" exists already'),
+        content: Text(
+          'Another page has this title. Links to [[$title]] lead to only '
+          'one of the two, so the other could be found only by searching.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Change the title'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Save anyway'),
           ),
         ],
       ),
