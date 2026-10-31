@@ -8,12 +8,42 @@ library;
 import 'package:flutter/material.dart';
 
 import 'db/database.dart';
+import 'db/tab_lock.dart';
 import 'pages/home_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Before opening: a second tab must not even read the database into
+  // memory, or its first write would overwrite the first tab's.
+  await holdDatabaseLock(GikiDatabase.defaultStorageName,
+      onWaiting: () => runApp(const OpenElsewhere()));
   final db = await GikiDatabase.open();
   runApp(GikiApp(db: db));
+}
+
+/// Shown while giki is open in another tab or window. The app starts here
+/// by itself once that one is closed.
+class OpenElsewhere extends StatelessWidget {
+  const OpenElsewhere({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      title: 'giki',
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'giki is open in another tab or window. Close it there, and '
+              'giki starts here.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// The application root.
