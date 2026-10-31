@@ -444,12 +444,15 @@ class _NodeEditorState extends State<NodeEditor> {
 
     // Two live pages with one title: every [[link]] to it leads to the older
     // one, so the other can be found only by searching. Ask when this save
-    // would make that happen -- a new page, or a rename -- but not on every
-    // save of a page that already shared its title.
+    // would make that happen -- a new page, a rename, or bringing back a
+    // page deleted elsewhere, whose title may have been taken since -- but
+    // not on every save of a page that already shared its title.
     final title = _title.text.trim();
     final key = normalizeTitle(title);
+    final restoring =
+        existing != null && widget.nodes.byId(existing.id) == null;
     if (key.isNotEmpty &&
-        (existing == null || normalizeTitle(_savedTitle) != key)) {
+        (existing == null || restoring || normalizeTitle(_savedTitle) != key)) {
       final other = widget.nodes.byTitle(title);
       if (other != null && other.id != existing?.id) {
         final saveAnyway = await _confirmDuplicateTitle(other.title);
@@ -648,8 +651,8 @@ class _NodeEditorState extends State<NodeEditor> {
       builder: (context) => AlertDialog(
         title: Text('"$title" exists already'),
         content: Text(
-          'Links to [[$title]] lead to the page that already has this '
-          'title, so this one could be found only by searching.',
+          'Another page has this title. Links to [[$title]] lead to only '
+          'one of the two, so the other could be found only by searching.',
         ),
         actions: [
           TextButton(

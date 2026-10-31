@@ -1192,12 +1192,22 @@ void main() {
     expect(cards.delete(twice), isFalse);
     expect(db.pendingCount, pending,
         reason: 'deleting a deleted card queued a write');
+  });
+
   // A second page with a title that is taken was saved without a word, and
   // every [[link]] to that title kept leading to the first one.
   testWidgets('saving a title that is taken asks first', (tester) async {
     final first = nodes.save(title: 'Twin', body: 'the first');
+    // Through the controllers: after a dialog closes, enterText does not
+    // reliably reach the field again in the browser, and the test would
+    // save the old title a second time.
+    void type(int field, String text) => tester
+        .widget<TextField>(find.byType(TextField).at(field))
+        .controller!
+        .text = text;
     Future<void> saveAs(String title) async {
-      await tester.enterText(find.byType(TextField).at(0), title);
+      type(0, title);
+      await tester.pump();
       await tester.tap(find.byTooltip('Save'));
       await tester.pumpAndSettle();
     }
@@ -1208,7 +1218,7 @@ void main() {
       home: NodeEditor(db: db, nodes: nodes, nodeId: null),
     ));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(1), 'Zwillingsseite');
+    type(1, 'Zwillingsseite');
     await saveAs('twin ');
     expect(find.text('"Twin" exists already'), findsOneWidget);
     await tester.tap(find.text('Change the title'));
@@ -1226,8 +1236,8 @@ void main() {
     await tester.tap(find.text('Save anyway'));
     await tester.pumpAndSettle();
     expect(nodes.byTitle('Twin')!.id, first);
-    await tester.enterText(
-        find.byType(TextField).at(1), 'Zwillingsseite bearbeitet');
+    type(1, 'Zwillingsseite bearbeitet');
+    await tester.pump();
     await tester.tap(find.byTooltip('Save'));
     await tester.pumpAndSettle();
     expect(find.textContaining('exists already'), findsNothing);
