@@ -64,6 +64,12 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   /// The configured server, or null when the URL is missing or unusable.
+  /// The server the stored session belongs to.
+  Uri? get _sessionServer {
+    final uri = Uri.tryParse(widget.db.meta(MetaKeys.serverUrl) ?? '');
+    return uri == null || !uri.hasScheme || uri.host.isEmpty ? null : uri;
+  }
+
   Uri? get _serverUri {
     final text = _url.text.trim();
     if (text.isEmpty) {
@@ -100,8 +106,8 @@ class _SettingsPageState extends State<SettingsPage> {
   /// ' Switched server ...' once after a switch, '' otherwise.
   String _takeSwitchedNote() {
     final note = _switched
-        ? ' Switched server: everything on this device will be sent to the '
-            'new one.'
+        ? ' Switched server: once you are signed in there, everything on '
+            'this device is sent to it.'
         : '';
     _switched = false;
     return note;
@@ -166,7 +172,11 @@ class _SettingsPageState extends State<SettingsPage> {
           return;
         }
         try {
-          final signedIn = widget.db.meta(MetaKeys.token) ?? '';
+          // The session belongs to the stored server: typed another URL,
+          // this registers a new account there instead of handing it over.
+          final signedIn = widget.db.isCurrentServer(api.baseUrl.toString())
+              ? widget.db.meta(MetaKeys.token) ?? ''
+              : '';
           final authorization =
               signedIn.isNotEmpty ? signedIn : _registerToken.text.trim();
           if (authorization.isEmpty) {
@@ -222,8 +232,9 @@ class _SettingsPageState extends State<SettingsPage> {
         }
 
         // Then tell the server, best effort: that is what stops the session
-        // being usable elsewhere.
-        final uri = _serverUri;
+        // being usable elsewhere. The one that issued it, not whatever the
+        // URL field says now.
+        final uri = _sessionServer;
         if (token.isEmpty || uri == null) {
           return;
         }
@@ -287,7 +298,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _refreshPasskeys() async {
     final token = widget.db.meta(MetaKeys.token) ?? '';
-    final uri = _serverUri;
+    final uri = _sessionServer;
     if (token.isEmpty || uri == null) {
       return;
     }
@@ -356,10 +367,11 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _removePasskey(PasskeyInfo passkey) => _guard(() async {
-        final api = _api();
-        if (api == null) {
+        final server = _sessionServer;
+        if (server == null) {
           return;
         }
+        final api = PasskeyApi(baseUrl: server);
         try {
           await api.deletePasskey(
             widget.db.meta(MetaKeys.token) ?? '',

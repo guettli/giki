@@ -220,15 +220,7 @@ class GikiDatabase {
   /// is uploaded again; an attachment whose bytes this device never fetched
   /// is not queued, since no server accepts a row without its bytes.
   bool setServerUrl(String url) {
-    // Same server however it is written: host case, a default port, a
-    // trailing slash.
-    String plain(String? u) {
-      final parsed = Uri.tryParse(u ?? '');
-      return (parsed == null ? (u ?? '') : parsed.toString())
-          .toLowerCase()
-          .replaceFirst(RegExp(r'/+$'), '');
-    }
-
+    const plain = _plainUrl;
     final previous = meta(MetaKeys.serverUrl);
     if (plain(previous) == plain(url)) {
       if (previous != url) {
@@ -265,6 +257,22 @@ class GikiDatabase {
     }
     serverGeneration++;
     return true;
+  }
+
+  /// Whether [url] names the server this device is set to, however it is
+  /// written. The stored session belongs to that server and no other.
+  bool isCurrentServer(String url) {
+    final current = _plainUrl(meta(MetaKeys.serverUrl));
+    return current.isNotEmpty && current == _plainUrl(url);
+  }
+
+  /// A URL as compared between servers: host case, a default port and a
+  /// trailing slash make no difference.
+  static String _plainUrl(String? url) {
+    final parsed = Uri.tryParse(url ?? '');
+    return (parsed == null ? (url ?? '') : parsed.toString())
+        .toLowerCase()
+        .replaceFirst(RegExp(r'/+$'), '');
   }
 
   /// Bumped by every switch to another server. A sync service built for an
