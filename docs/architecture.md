@@ -86,6 +86,12 @@ Known gaps, roughly in the order they will start to hurt:
   app currently falls back to the IndexedDB-backed VFS on the main thread. The
   fix is to move the database into a worker and talk to it over messages --
   worth doing, and not a protocol change.
+* **One tab at a time.** Each tab holds the whole database in memory and
+  writes blocks back, so two tabs would overwrite each other's saves. The app
+  takes an exclusive Web Lock per database before opening it
+  (`client/lib/db/tab_lock.dart`); a second tab waits, says so, and starts
+  when the first is closed. A shared worker owning the database would let
+  several tabs work at once.
 * **Duplicate titles.** `nodes.title_key` is deliberately *not* unique: two
   offline devices creating "Spaced Repetition" would otherwise produce a batch
   that can never be applied. The UI should detect duplicates and offer a merge.

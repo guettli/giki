@@ -87,6 +87,9 @@ class GikiDatabase {
   /// can only persist a file called `/database`, so that name is not ours to
   /// choose when OPFS is in use.
   static const String _opfsPath = '/database';
+
+  /// The storage name the app uses; see [open].
+  static const String defaultStorageName = 'giki';
   static const String _indexedDbPath = '/giki.sqlite';
 
   /// Opens (and on first launch creates) the local database.
@@ -100,7 +103,7 @@ class GikiDatabase {
   /// run left behind.
   static Future<GikiDatabase> open({
     String wasmUrl = 'sqlite3.wasm',
-    String storageName = 'giki',
+    String storageName = defaultStorageName,
   }) async {
     // Relative to <base href>, like every other file of the app. Dart resolves
     // a relative URL against the page's address instead, so a reload on
