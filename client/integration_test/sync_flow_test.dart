@@ -1192,6 +1192,46 @@ void main() {
     expect(cards.delete(twice), isFalse);
     expect(db.pendingCount, pending,
         reason: 'deleting a deleted card queued a write');
+  // A second page with a title that is taken was saved without a word, and
+  // every [[link]] to that title kept leading to the first one.
+  testWidgets('saving a title that is taken asks first', (tester) async {
+    final first = nodes.save(title: 'Twin', body: 'the first');
+    Future<void> saveAs(String title) async {
+      await tester.enterText(find.byType(TextField).at(0), title);
+      await tester.tap(find.byTooltip('Save'));
+      await tester.pumpAndSettle();
+    }
+
+    // A new page.
+    await tester.pumpWidget(MaterialApp(
+      key: UniqueKey(),
+      home: NodeEditor(db: db, nodes: nodes, nodeId: null),
+    ));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(1), 'Zwillingsseite');
+    await saveAs('twin ');
+    expect(find.text('"Twin" exists already'), findsOneWidget);
+    await tester.tap(find.text('Change the title'));
+    await tester.pumpAndSettle();
+    expect(nodes.search('Zwillingsseite'), isEmpty,
+        reason: 'the page was saved although the user chose to rename it');
+    await saveAs('Twin, the other');
+    expect(find.textContaining('exists already'), findsNothing);
+    expect(nodes.byTitle('Twin, the other'), isNotNull);
+
+    // A rename onto the taken title asks too; once the user chose to save
+    // anyway, saving again does not ask again.
+    await saveAs('Twin');
+    expect(find.text('"Twin" exists already'), findsOneWidget);
+    await tester.tap(find.text('Save anyway'));
+    await tester.pumpAndSettle();
+    expect(nodes.byTitle('Twin')!.id, first);
+    await tester.enterText(
+        find.byType(TextField).at(1), 'Zwillingsseite bearbeitet');
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('exists already'), findsNothing);
+    expect(nodes.search('bearbeitet'), isNotEmpty);
   });
 
   testWidgets('text fields have an accessible name', (tester) async {

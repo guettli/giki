@@ -442,9 +442,26 @@ class _NodeEditorState extends State<NodeEditor> {
       }
     }
 
+    // Two live pages with one title: every [[link]] to it leads to the older
+    // one, so the other can be found only by searching. Ask when this save
+    // would make that happen -- a new page, or a rename -- but not on every
+    // save of a page that already shared its title.
+    final title = _title.text.trim();
+    final key = normalizeTitle(title);
+    if (key.isNotEmpty &&
+        (existing == null || normalizeTitle(_savedTitle) != key)) {
+      final other = widget.nodes.byTitle(title);
+      if (other != null && other.id != existing?.id) {
+        final saveAnyway = await _confirmDuplicateTitle(other.title);
+        if (!mounted || !saveAnyway) {
+          return;
+        }
+      }
+    }
+
     final id = widget.nodes.save(
       id: existing?.id,
-      title: _title.text.trim(),
+      title: title,
       body: _body.text,
     );
     setState(() {
@@ -618,6 +635,30 @@ class _NodeEditorState extends State<NodeEditor> {
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Restore with my text'),
+          ),
+        ],
+      ),
+    );
+    return choice ?? false;
+  }
+
+  Future<bool> _confirmDuplicateTitle(String title) async {
+    final choice = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('"$title" exists already'),
+        content: Text(
+          'Links to [[$title]] lead to the page that already has this '
+          'title, so this one could be found only by searching.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Change the title'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Save anyway'),
           ),
         ],
       ),
