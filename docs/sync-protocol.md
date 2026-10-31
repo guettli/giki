@@ -125,11 +125,19 @@ them loses data quietly, which is why each has a test.
   preserved only in the ChangeLog. Acceptable for a knowledge base, not for
   simultaneous prose editing.
 * **No clock authority.** LWW trusts the client's clock. A device whose clock
-  is hours ahead wins conflicts it should not. `server_time` is returned so the
-  client can notice and warn; it does not yet.
-* **No tie-break.** Two mutations with the exact same millisecond are resolved
-  by arrival order at the server. Deterministic for a given server, arbitrary
-  across one.
+  is hours ahead wins *concurrent* conflicts it should not. An edit made after
+  seeing a version always beats it, though: the client's write clock is a
+  hybrid logical clock (`nowClock` in `client/lib/db/clock.dart`), later than
+  every `updated_at` it has issued, pulled or stored and than the last
+  `server_time`. Without that, a device whose clock is behind would stamp its
+  edit older than the version it just pulled, the server would call it stale,
+  and the device would keep text no other device ever sees. A clock more than
+  a day ahead of the real time (the device's own, corrected by `server_time`)
+  is not followed, so one device set to 2099 cannot drag everyone along.
+* **Ties go to the server.** Two mutations with the exact same millisecond are
+  resolved by arrival order at the server, which keeps the row it already has.
+  A client applies a delta whose `updated_at` equals its own row's, so every
+  device ends up with the server's choice.
 * **No partial sync.** Every client gets every change it is allowed to see.
   Per-notebook or per-user scoping would be a `WHERE` clause on the delta
   query, and a decision about who may read what -- neither exists yet.

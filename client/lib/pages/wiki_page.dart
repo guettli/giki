@@ -253,6 +253,14 @@ class _NodeEditorState extends State<NodeEditor> {
   /// another device changed the page while it was open.
   String? get _baseVersion => _node?.updatedAt;
 
+  /// Whether [stored] is still the version this editor is based on. The
+  /// timestamp alone is not enough: on a tie, a delta from another device
+  /// replaces the row and keeps its updated_at (see applyDeltas).
+  bool _isBaseVersion(Node stored) =>
+      stored.updatedAt == _baseVersion &&
+      stored.title == _node?.title &&
+      stored.body == _node?.body;
+
   /// The text as loaded or last saved, to tell "the user edited something"
   /// apart from "the user pressed Save".
   ///
@@ -370,7 +378,7 @@ class _NodeEditorState extends State<NodeEditor> {
       // Restored elsewhere; from here on it is an ordinary newer version.
       setState(() => _deletedElsewhere = false);
     }
-    if (stored.updatedAt == _baseVersion) {
+    if (_isBaseVersion(stored)) {
       return;
     }
     if (_dirty) {
@@ -421,7 +429,7 @@ class _NodeEditorState extends State<NodeEditor> {
           Navigator.of(context).pop();
           return;
         }
-      } else if (stored.updatedAt != _baseVersion) {
+      } else if (!_isBaseVersion(stored)) {
         final overwrite = await _confirmOverwrite();
         if (!mounted) {
           return;

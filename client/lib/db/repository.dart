@@ -406,7 +406,8 @@ class CardRepository {
   void review(DueCard card, Rating rating, {DateTime? at}) {
     final now = at ?? DateTime.now();
     final next = schedule(card.state, rating, now);
-    final clock = formatClock(now);
+    final clock = at == null ? nowClock() : formatClock(at);
+    observeClock(clock);
 
     _db.raw.execute('BEGIN IMMEDIATE');
     try {
