@@ -680,10 +680,7 @@ class _NodeEditorState extends State<NodeEditor> {
     final backlinks = node == null
         ? const <NodeSummary>[]
         : widget.nodes.backlinks(node.titleKey);
-    // From the link index, so as saved: parsing the text on every keystroke
-    // is a full Markdown parse, which a long page makes slow.
-    final targets =
-        node == null ? const <String>[] : widget.nodes.linksFrom(node.id);
+    final targets = node == null ? const <String>[] : _linkTargets(node.body);
 
     return Scaffold(
       appBar: AppBar(
@@ -813,16 +810,19 @@ class _NodeEditorState extends State<NodeEditor> {
           const SizedBox(height: 16),
           if (targets.isNotEmpty) ...[
             Text('Links out', style: Theme.of(context).textTheme.titleSmall),
-            for (final target in targets)
+            for (final (target, page) in [
+              for (final target in targets)
+                (target, widget.nodes.byTitle(target)),
+            ])
               ListTile(
                 dense: true,
                 leading: Icon(
-                  widget.nodes.byTitle(target) == null
-                      ? Icons.add_circle_outline
-                      : Icons.north_east,
+                  page == null ? Icons.add_circle_outline : Icons.north_east,
                 ),
-                title: Text(target),
-                subtitle: Text(widget.nodes.byTitle(target) == null
+                // The page's own title once it exists; until then the title
+                // as the link writes it, which is also what tapping creates.
+                title: Text(page?.title ?? target),
+                subtitle: Text(page == null
                     ? 'does not exist yet -- tap to create'
                     : 'open'),
                 onTap: () => _follow(target),
@@ -896,6 +896,21 @@ class _NodeEditorState extends State<NodeEditor> {
     });
     _snack('Earlier version loaded. Save to keep it.');
   }
+
+  /// The [[links]] of the saved text, as written. The link index holds only
+  /// lowercased keys, and a page created from one was called "lakes" where
+  /// the text said [[Lakes]]. Parsed once per saved version, not on every
+  /// keystroke: a long page makes a parse slow.
+  List<String> _linkTargets(String body) {
+    if (body != _targetsOf) {
+      _targets = linkTargets(body);
+      _targetsOf = body;
+    }
+    return _targets;
+  }
+
+  String? _targetsOf;
+  List<String> _targets = const [];
 
   /// Follows a [[link]], creating the target page if it does not exist yet.
   Future<void> _follow(String titleKey) async {
