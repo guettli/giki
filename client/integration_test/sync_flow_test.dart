@@ -1684,6 +1684,56 @@ void main() {
     expect(report.stale, 0, reason: report.toString());
     expect((await latestServerPayload(id))['body'], 'edited after pulling');
   });
+
+  // Last too: it queues this device's whole database again. Switching the
+  // server kept the old server's cursor and an outbox that held only what
+  // the old server lacked, so the new one never got most of the pages and
+  // its own first changes were skipped.
+  testWidgets('switching servers sends everything, and pulls from the start',
+      (_) async {
+    db.setServerUrl('https://one.example');
+    expect(db.setServerUrl('https://one.example/'), isFalse,
+        reason: 'a trailing slash is not another server');
+    await sync.syncUntilCaughtUp();
+    expect(db.pendingCount, 0);
+    expect(db.cursor, greaterThan(0));
+    int count(String sql) => db.raw.select(sql).first.values.first as int;
+
+    expect(db.setServerUrl('HTTPS://One.Example:443/'), isFalse,
+        reason: 'host case and a default port are not another server');
+    expect(db.setServerUrl('https://two.example'), isTrue);
+    expect(db.cursor, 0);
+    expect(db.meta(MetaKeys.token), '',
+        reason: "the old server's session would be sent to the new one");
+    final queued = db.pendingCount;
+
+    // The service built for the old server must not settle any of it there.
+    final report = await sync.syncOnce();
+    expect(report.pushed, 0);
+    expect(db.pendingCount, queued);
+    expect(db.cursor, 0);
+    expect(count("SELECT COUNT(*) FROM sync_outbox WHERE table_name = 'nodes'"),
+        count('SELECT COUNT(*) FROM nodes'),
+        reason: 'not every page was queued for the new server');
+    expect(count('SELECT COUNT(*) FROM blobs WHERE uploaded = 1'), 0);
+
+    // A service for the new server -- here the same real one, which has
+    // everything already: all of it comes back stale or applied, nothing is
+    // refused, and the cursor catches up again.
+    final fresh = SyncService(db: db, api: api);
+    final refused = <String>[];
+    for (var round = 0; round < 50; round++) {
+      final report = await fresh.syncOnce();
+      refused.addAll(report.rejected.map((r) => r.reason));
+      if (!report.hasMore && db.pendingCount == 0) {
+        break;
+      }
+    }
+    expect(refused, isEmpty);
+    expect(db.pendingCount, 0);
+    expect(db.cursor, greaterThan(0));
+    await fresh.dispose();
+  });
 }
 
 /// Passkey phases.

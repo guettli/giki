@@ -208,6 +208,78 @@ class GikiDatabase {
     );
   }
 
+  /// Points this device at the server [url], and says whether that is a
+  /// different server than before.
+  ///
+  /// A different server starts from scratch, both ways. The cursor counted
+  /// the old server's ChangeLog: kept, it skipped that many of the new
+  /// server's changes. And the outbox held only what the old server had not
+  /// got yet: everything else on this device would never reach the new one.
+  /// So the cursor goes back to 0, and every row is queued again -- rows the
+  /// server already has come back "stale", which costs nothing. Every blob
+  /// is uploaded again; an attachment whose bytes this device never fetched
+  /// is not queued, since no server accepts a row without its bytes.
+  bool setServerUrl(String url) {
+    const plain = _plainUrl;
+    final previous = meta(MetaKeys.serverUrl);
+    if (plain(previous) == plain(url)) {
+      if (previous != url) {
+        setMeta(MetaKeys.serverUrl, url);
+      }
+      return false;
+    }
+    raw.execute('BEGIN IMMEDIATE');
+    try {
+      setMeta(MetaKeys.serverUrl, url);
+      if (plain(previous).isNotEmpty) {
+        // The old server's session means nothing to the new one, and must
+        // not be sent to it.
+        setMeta(MetaKeys.token, '');
+        setMeta(MetaKeys.passkeyId, '');
+        setMeta(MetaKeys.cursor, '0');
+        for (final table in syncableTables) {
+          // A no-op update still fires the outbox trigger, which queues the
+          // row exactly as it is, with its own updated_at.
+          raw.execute(table == 'attachments'
+              ? 'UPDATE attachments SET id = id WHERE is_deleted = 1 '
+                  'OR sha256 IN (SELECT sha256 FROM blobs)'
+              : 'UPDATE "$table" SET id = id');
+        }
+        raw.execute('UPDATE blobs SET uploaded = 0');
+      }
+      raw.execute('COMMIT');
+    } on Object {
+      raw.execute('ROLLBACK');
+      rethrow;
+    }
+    if (plain(previous).isEmpty) {
+      return false;
+    }
+    serverGeneration++;
+    return true;
+  }
+
+  /// Whether [url] names the server this device is set to, however it is
+  /// written. The stored session belongs to that server and no other.
+  bool isCurrentServer(String url) {
+    final current = _plainUrl(meta(MetaKeys.serverUrl));
+    return current.isNotEmpty && current == _plainUrl(url);
+  }
+
+  /// A URL as compared between servers: host case, a default port and a
+  /// trailing slash make no difference.
+  static String _plainUrl(String? url) {
+    final parsed = Uri.tryParse(url ?? '');
+    return (parsed == null ? (url ?? '') : parsed.toString())
+        .toLowerCase()
+        .replaceFirst(RegExp(r'/+$'), '');
+  }
+
+  /// Bumped by every switch to another server. A sync service built for an
+  /// earlier one must stop writing: its round would settle the re-queued
+  /// outbox, the blob flags and the cursor against the old server.
+  int serverGeneration = 0;
+
   /// This device's id, generated on first launch and stable afterwards.
   String get deviceId => meta(MetaKeys.deviceId)!;
 
