@@ -473,8 +473,10 @@ void main() {
     final node = nodes.byId(id)!;
     final createdAt = db.raw.select(
         'SELECT created_at, created_by FROM nodes WHERE id = ?', [id]).first;
+    // Later than anything this client has written, whatever its clock has
+    // been pulled forward to by earlier phases.
     final clock =
-        formatClock(DateTime.now().toUtc().add(const Duration(seconds: 1)));
+        formatClock(parseClock(nowClock()).add(const Duration(seconds: 1)));
     db.applyDeltas([
       Delta(
         seq: 0,

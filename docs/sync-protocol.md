@@ -131,7 +131,9 @@ them loses data quietly, which is why each has a test.
   every `updated_at` it has issued, pulled or stored and than the last
   `server_time`. Without that, a device whose clock is behind would stamp its
   edit older than the version it just pulled, the server would call it stale,
-  and the device would keep text no other device ever sees.
+  and the device would keep text no other device ever sees. A clock more than
+  a day ahead of the real time (the device's own, corrected by `server_time`)
+  is not followed, so one device set to 2099 cannot drag everyone along.
 * **Ties go to the server.** Two mutations with the exact same millisecond are
   resolved by arrival order at the server, which keeps the row it already has.
   A client applies a delta whose `updated_at` equals its own row's, so every

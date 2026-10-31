@@ -33,12 +33,31 @@ void main() {
 
   test('a write clock is later than any clock seen', () {
     final ahead =
-        formatClock(DateTime.now().toUtc().add(const Duration(days: 1)));
+        formatClock(DateTime.now().toUtc().add(const Duration(hours: 1)));
     observeClock(ahead);
     expect(nowClock().compareTo(ahead), greaterThan(0));
     // Something older does not pull it back.
     observeClock('2000-01-01T00:00:00.000Z');
     expect(nowClock().compareTo(ahead), greaterThan(0));
+  });
+
+  test('a clock far in the future is not followed', () {
+    final absurd = formatClock(DateTime.utc(2099));
+    observeClock(absurd);
+    expect(nowClock().compareTo(absurd), lessThan(0));
+  });
+
+  test("the server's time corrects how far ahead a clock may be", () {
+    // As if this device's clock were three days behind the server's.
+    final server =
+        formatClock(DateTime.now().toUtc().add(const Duration(days: 3)));
+    observeServerClock(server);
+    expect(nowClock().compareTo(server), greaterThan(0));
+    final row = formatClock(
+        DateTime.now().toUtc().add(const Duration(days: 3, hours: 2)));
+    observeClock(row);
+    expect(nowClock().compareTo(row), greaterThan(0),
+        reason: 'a clock just ahead of the server was ignored');
   });
 
   test('a clock that is not a giki timestamp is ignored', () {

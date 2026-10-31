@@ -230,7 +230,7 @@ class SyncService {
       // would lose them.
       // A device whose clock is behind the server's writes after it from
       // now on, so its next edit is not born stale.
-      observeClock(response.serverTime);
+      observeServerClock(response.serverTime);
       _db.applyDeltas(response.changes, response.cursor);
       await _db.flush();
 

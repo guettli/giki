@@ -34,18 +34,41 @@ String nowClock() {
   return _latest = clock;
 }
 
-/// Notes a clock seen in a row or from the server, so the next [nowClock]
-/// is later. Anything that is not a giki timestamp is ignored: one garbage
-/// string would otherwise compare above every real clock forever.
+/// Notes a clock seen in a row, so the next [nowClock] is later.
+///
+/// Ignored: anything that is not a giki timestamp, since one garbage string
+/// would compare above every real clock forever; and a clock more than
+/// [maxClockLead] ahead of the real time, as best this device knows it.
+/// Following a device whose clock says 2099 would drag every device's
+/// writes, reviews and "edited ... ago" into 2099 with it, for good.
 void observeClock(String? clock) {
-  if (clock != null &&
-      _canonical.hasMatch(clock) &&
-      clock.compareTo(_latest) > 0) {
+  if (clock == null || !_canonical.hasMatch(clock)) {
+    return;
+  }
+  final limit = formatClock(DateTime.now().add(_serverLead).add(maxClockLead));
+  if (clock.compareTo(_latest) > 0 && clock.compareTo(limit) <= 0) {
     _latest = clock;
   }
 }
 
+/// Notes the server's time. It is followed like a row's clock, and it also
+/// corrects this device's idea of the real time for [observeClock] -- a
+/// device whose own clock is a day behind would otherwise ignore every
+/// ordinary clock as too far ahead.
+void observeServerClock(String? clock) {
+  if (clock == null || !_canonical.hasMatch(clock)) {
+    return;
+  }
+  final lead = parseClock(clock).difference(DateTime.now());
+  _serverLead = lead.isNegative ? Duration.zero : lead;
+  observeClock(clock);
+}
+
+/// How far ahead of the real time a clock may be and still be followed.
+const maxClockLead = Duration(days: 1);
+
 String _latest = '';
+Duration _serverLead = Duration.zero;
 
 final _canonical = RegExp(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$');
 
