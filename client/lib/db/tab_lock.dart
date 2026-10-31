@@ -33,10 +33,23 @@ Future<void> holdDatabaseLock(
     onWaiting();
     await _request(name, ifAvailable: false);
   }
+  // A page restored from the back-forward cache may come back without its
+  // lock but with its old copy of the database in memory. Chrome and
+  // Firefox never cache a page that holds a lock; for any engine that does,
+  // start over.
+  web.window.addEventListener(
+    'pageshow',
+    ((web.PageTransitionEvent event) {
+      if (event.persisted) {
+        web.window.location.reload();
+      }
+    }).toJS,
+  );
 }
 
 /// Never completes: returned to the lock manager, it keeps the lock until
-/// the tab goes away.
+/// the tab goes away. (Also across a hot restart in `flutter run`, which
+/// re-runs main in the same page: reload the page instead.)
 final _forever = Completer<JSAny?>();
 
 /// Asks for the lock; completes with whether it was granted. With
@@ -56,6 +69,13 @@ Future<bool> _request(String name, {required bool ifAvailable}) {
         onGrant.toJS,
       )
       .toDart
-      .ignore();
+      .then<void>((_) {}, onError: (Object _) {
+    // Refused outright -- an opaque origin, a document going away. Waiting
+    // for a grant that never comes would leave a blank page; start
+    // unguarded instead, as without the API.
+    if (!granted.isCompleted) {
+      granted.complete(true);
+    }
+  });
   return granted.future;
 }
