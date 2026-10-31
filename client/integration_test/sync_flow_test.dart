@@ -1462,6 +1462,27 @@ void main() {
     expect(find.text('Rendered Target'), findsWidgets);
   });
 
+  // "Links out" came from the link index, which keeps only lowercased keys:
+  // it listed [[Mountain Lakes]] as "mountain lakes", and tapping it created
+  // a page called that.
+  testWidgets('"Links out" keeps a link as written, and creates it so',
+      (tester) async {
+    nodes.save(title: 'Glacier', body: '');
+    final id = nodes.save(
+      title: 'Hiking',
+      body: 'See [[Mountain Lakes]], [[mountain  lakes]] and [[glacier]].',
+    );
+    await openEditor(tester, id);
+    expect(find.text('Mountain Lakes'), findsOneWidget,
+        reason: 'a link is listed once, as first written');
+    expect(find.text('mountain lakes'), findsNothing);
+    expect(find.text('Glacier'), findsOneWidget,
+        reason: 'an existing page is listed under its own title');
+    await tester.tap(find.text('Mountain Lakes'));
+    await tester.pumpAndSettle();
+    expect(nodes.byTitle('mountain lakes')?.title, 'Mountain Lakes');
+  });
+
   testWidgets('a question :: answer line in a page becomes a card', (_) async {
     final cards = CardRepository(db);
     List<String> due() => [

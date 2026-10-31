@@ -277,15 +277,6 @@ class NodeRepository {
     return wanted;
   }
 
-  /// The title_keys that node [id] links to, as last saved.
-  List<String> linksFrom(String id) => [
-        for (final row in _db.raw.select(
-            'SELECT target_title_key FROM links WHERE source_node_id = ? '
-            'ORDER BY target_title_key',
-            [id]))
-          row['target_title_key'] as String,
-      ];
-
   Node _node(Map<String, Object?> row) => Node(
         id: row['id'] as String,
         title: row['title'] as String,
