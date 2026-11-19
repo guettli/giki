@@ -5,5 +5,7 @@
 # Flutter ships its own Dart SDK, so `dart` comes from the flutter install --
 # do not add a separate dart entry, it would shadow the matching one.
 [tools]
+betterleaks = "1.10.1"
+prek = "0.5.11"
 go = "1.26"
 flutter = "3.47.7"
